@@ -236,11 +236,6 @@ if (string.IsNullOrEmpty(publicKey)==false)
 
         private void RequestContentUpdate(Tile tile)
         {
-            //tile.parent.IncrementLoadingChildren();
-            //foreach (var child in tile.children)
-            //{
-            //    child.IncrementLoadingParents();
-            //}
             if (!tile.content)
             {
                 var newContentGameObject = new GameObject($"{tile.level},{tile.X},{tile.Y} content");
@@ -293,25 +288,17 @@ if (string.IsNullOrEmpty(publicKey)==false)
             {
                 //If camera changed, recalculate what tiles are be in view
                 currentCamera.transform.GetPositionAndRotation(out currentCameraPosition, out currentCameraRotation);
+                lastCameraAngle = (currentCamera.orthographic ? currentCamera.orthographicSize : currentCamera.fieldOfView);
+                currentCamera.transform.GetPositionAndRotation(out lastCameraPosition, out lastCameraRotation);
 
-                //if (nestedTreeLoaded || CameraChanged())
-                //{
-                //    nestedTreeLoaded = false;
+                SetSSEComponent(currentCamera);
+                DisposeTilesOutsideView(currentCamera);
 
-                    lastCameraAngle = (currentCamera.orthographic ? currentCamera.orthographicSize : currentCamera.fieldOfView);
-                    currentCamera.transform.GetPositionAndRotation(out lastCameraPosition, out lastCameraRotation);
-
-                    SetSSEComponent(currentCamera);
-                    DisposeTilesOutsideView(currentCamera);
-
-                    //root.IsInViewFrustrum(currentCamera);
                 foreach (var child in root.children)
                 {
                     LoadInViewRecursively(child, currentCamera);
                 }
                     
-                //}
-
                 yield return null;
             }
         }
