@@ -138,14 +138,14 @@ namespace Netherlands3D.Tiles3D
                     MovingOriginFollower sceneOriginFollower = scene.gameObject.AddComponent<MovingOriginFollower>();
                     if (parsedGltf.rtcCenter != null)
                     {
-                        scene.rotation = CoordinateConverter.ecefRotionToUp() * (scene.rotation);
+                        //scene.rotation = CoordinateConverter.ecefRotionToUp() * (scene.rotation);
                         Vector3 unityPosition = CoordinateConverter.ECEFToUnity(new Vector3ECEF(parsedGltf.rtcCenter[0] + parentTile.transform[12], parsedGltf.rtcCenter[1] + parentTile.transform[13], parsedGltf.rtcCenter[2] + parentTile.transform[14]));
                         scene.position = unityPosition;
                     }
                     else
                     {
                         Vector3 unityPosition = CoordinateConverter.ECEFToUnity(new Vector3ECEF(-scene.localPosition.x + parentTile.transform[12], -scene.localPosition.z + parentTile.transform[13], scene.localPosition.y + parentTile.transform[14]));
-                        scene.rotation = CoordinateConverter.ecefRotionToUp() * (scene.rotation);
+                        //scene.rotation = CoordinateConverter.ecefRotionToUp() * (scene.rotation);
                         scene.position = unityPosition;
                     }
 

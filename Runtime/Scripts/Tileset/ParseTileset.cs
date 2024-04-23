@@ -78,6 +78,20 @@ namespace Netherlands3D.Tiles3D
             tile.geometricError = double.Parse(node["geometricError"].Value);
             tile.refine = node["refine"].Value;
             JSONNode childrenNode = node["children"];
+            JSONNode transformNode = node["transform"];
+            double[] transformValues = null;
+            if(transformNode != null)
+            {
+                transformValues = new double[16] { 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0 };
+                if (transformNode != null)
+                {
+                    for (int i = 0; i < 16; i++)
+                    {
+                        transformValues[i] = transformNode[i].AsDouble;
+                    }
+                }
+                tile.transform = transformValues;
+            }
 
             tile.children = new List<Tile>();
             if (childrenNode != null)
@@ -85,7 +99,7 @@ namespace Netherlands3D.Tiles3D
                 for (int i = 0; i < childrenNode.Count; i++)
                 {
                     var childTile = new Tile();
-                    childTile.transform = tile.transform;
+                    childTile.transform = (transformValues!= null) ? transformValues : tile.transform;
                     childTile.parent = tile;
                     tile.children.Add(ReadExplicitNode(childrenNode[i], childTile));
                 }
