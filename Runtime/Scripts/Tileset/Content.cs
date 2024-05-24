@@ -135,19 +135,18 @@ namespace Netherlands3D.Tiles3D
                     scene = transform.GetChild(i).transform;
                     if(scene == null) continue;
 
-                    MovingOriginFollower sceneOriginFollower = scene.gameObject.AddComponent<MovingOriginFollower>();
+                    // get the origin of the gameObject by combining the tileTransform and the gameObject transform
+                    Coordinate SceneOrigin = new Coordinate(CoordinateSystem.WGS84_ECEF, -scene.localPosition.x + parentTile.transform[12], -scene.localPosition.z + parentTile.transform[13], scene.localPosition.y + parentTile.transform[14]);// = CoordinateConverter.ECEFToUnity(new Vector3ECEF(-scene.localPosition.x + parentTile.transform[12], -scene.localPosition.z + parentTile.transform[13], scene.localPosition.y + parentTile.transform[14]));
+
+                    // if rtcCenter is defined in the gltf, get the rogin from rtcCenter combined with the gameobject transform
                     if (parsedGltf.rtcCenter != null)
                     {
-                        scene.rotation = CoordinateConverter.ecefRotionToUp() * (scene.rotation);
-                        Vector3 unityPosition = CoordinateConverter.ECEFToUnity(new Vector3ECEF(parsedGltf.rtcCenter[0] + parentTile.transform[12], parsedGltf.rtcCenter[1] + parentTile.transform[13], parsedGltf.rtcCenter[2] + parentTile.transform[14]));
-                        scene.position = unityPosition;
+                        SceneOrigin = new Coordinate(CoordinateSystem.WGS84_ECEF, parsedGltf.rtcCenter[0] + parentTile.transform[12], parsedGltf.rtcCenter[1] + parentTile.transform[13], parsedGltf.rtcCenter[2] + parentTile.transform[14]);
                     }
-                    else
-                    {
-                        Vector3 unityPosition = CoordinateConverter.ECEFToUnity(new Vector3ECEF(-scene.localPosition.x + parentTile.transform[12], -scene.localPosition.z + parentTile.transform[13], scene.localPosition.y + parentTile.transform[14]));
-                        scene.rotation = CoordinateConverter.ecefRotionToUp() * (scene.rotation);
-                        scene.position = unityPosition;
-                    }
+
+                    scene.position = SceneOrigin.ToUnity();
+                    scene.rotation = SceneOrigin.RotationToLocalGravityUp() * (scene.rotation);
+                    
                 }
 
                 this.gameObject.name = uri;
