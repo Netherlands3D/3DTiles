@@ -12,6 +12,8 @@ namespace Netherlands3D.Tiles3D
     public class Content : MonoBehaviour, IDisposable
     {
         public string uri = "";
+        public Coordinate contentCoordinate;
+        public CoordinateSystem contentcoordinateSystem;
 
 #if SUBOBJECT
         public bool parseSubObjects = true;
@@ -25,6 +27,7 @@ namespace Netherlands3D.Tiles3D
         public Tile ParentTile { get => parentTile; set => parentTile = value; }
 
         public UnityEvent onDoneDownloading = new();
+        public UnityEvent<Content> onTileLoadCompleted = new();
 
         private UnityEngine.Material overrideMaterial;
 
@@ -82,7 +85,7 @@ namespace Netherlands3D.Tiles3D
         /// <summary>
         /// Load the content from an url
         /// </summary>
-        public void Load(UnityEngine.Material overrideMaterial = null, Dictionary<string, string> headers = null)
+        public void Load(UnityEngine.Material overrideMaterial = null, Dictionary<string, string> headers = null, bool verbose = false)
         {
             this.headers = headers;
             if (overrideMaterial != null)
@@ -95,6 +98,7 @@ namespace Netherlands3D.Tiles3D
 
             State = ContentLoadState.DOWNLOADING;
             parentTile.isLoading = true;
+            TIleContentLoader.debugLog = verbose;
             runningContentRequest = StartCoroutine(
            TIleContentLoader.DownloadContent(
                uri,
@@ -110,14 +114,7 @@ namespace Netherlands3D.Tiles3D
                )
            );
             return;
-            //runningContentRequest = StartCoroutine(
-            //    ImportB3DMGltf.ImportBinFromURL(
-            //        uri, 
-            //        GotGltfContent,
-            //        false,
-            //        headers
-                //)
-            //);
+           
         }
 
         private void DownloadedData(byte[] data,string uri)
@@ -134,10 +131,10 @@ namespace Netherlands3D.Tiles3D
                 ParentTile,
                 FinishedLoading,
                 parseAssetMetaData,
-               parseSubObjects,
-               overrideMaterial,
-               false,
-               headers
+                parseSubObjects,
+                overrideMaterial, 
+                false,
+                headers
                 );
         }
 
@@ -149,87 +146,7 @@ namespace Netherlands3D.Tiles3D
         {
             State = ContentLoadState.DOWNLOADED;
             onDoneDownloading.Invoke();
-
-        }
-        private async void GotGltfContent(ParsedGltf parsedGltf)
-        {
-            if (State != ContentLoadState.DOWNLOADING)
-            {
-                State = ContentLoadState.DOWNLOADED;
-                return;
-            }
-            State = ContentLoadState.PARSING;
-            parentTile.isLoading = false;
-            if (parsedGltf == null)
-            {
-                Debug.Log("failed to parse: "+ uri +" , trying again");
-                State = ContentLoadState.DOWNLOADED;
-                return;
-            }
-
-            var gltf = parsedGltf.gltfImport;
-            var scene = transform;
-            if (gltf != null)
-            {
-                this.gltf = gltf;
-                var scenes = gltf.SceneCount;
-
-                for (int i = 0; i < scenes; i++)
-                {
-                    await gltf.InstantiateSceneAsync(transform, i);
-                    scene = transform.GetChild(i).transform;
-                    foreach (var child in scene.GetComponentsInChildren<Transform>(true)) //getting the Transform components ensures the layer of each recursive child is set 
-                    {
-                        child.gameObject.layer = gameObject.layer;
-                    }
-                    
-                    if(scene == null) continue;
-
-                    if (parsedGltf.rtcCenter != null)
-                    {
-                        
-                        //Debug.Log("Has RTC-Center "+ parsedGltf.rtcCenter[0] +";"+ parsedGltf.rtcCenter[1]+";"+ parsedGltf.rtcCenter[2]);
-                        scene.rotation = CoordinateConverter.ecefRotionToUp() * (scene.rotation);
-                        Coordinate sceneCoordinate = new Coordinate(CoordinateSystem.WGS84_ECEF, parsedGltf.rtcCenter[0], parsedGltf.rtcCenter[1], parsedGltf.rtcCenter[2]);
-                        Coordinate transformedCoordinate = parentTile.tileTransform.MultiplyPoint3x4(sceneCoordinate);
-                        Vector3 unityPosition = transformedCoordinate.ToUnity();
-
-                        //Vector3 unityPosition = CoordinateConverter.ECEFToUnity(new Vector3ECEF(parsedGltf.rtcCenter[0] + parentTile.transform[12], parsedGltf.rtcCenter[1] + parentTile.transform[13], parsedGltf.rtcCenter[2] + parentTile.transform[14]));
-                        scene.position = unityPosition;
-                    }
-                    else
-                    {
-                        Coordinate sceneCoordinate = new Coordinate(CoordinateSystem.WGS84_ECEF, -scene.localPosition.x, -scene.localPosition.z, scene.localPosition.y);
-                        Coordinate transformedCoordinate = parentTile.tileTransform.MultiplyPoint3x4(sceneCoordinate);
-                        Vector3 unityPosition = transformedCoordinate.ToUnity();
-                        scene.rotation = CoordinateConverter.ecefRotionToUp() * (scene.rotation);
-                        scene.position = unityPosition;
-                    }
-                }
-
-                this.gameObject.name = uri;
-                
-                if(parseAssetMetaData)
-                {
-                    parsedGltf.ParseAssetMetaData(this);
-                }
-
-                //Check if mesh features addon is used to define subobjects
-#if SUBOBJECT
-                if(parseSubObjects)
-                {
-                    parsedGltf.ParseSubObjects(transform);
-                }
-#endif
-
-                if(overrideMaterial != null)
-                {
-                    OverrideAllMaterials(transform);
-                }
-            }
-
-            State = ContentLoadState.DOWNLOADED;
-            onDoneDownloading.Invoke();
+            onTileLoadCompleted.Invoke(this);
         }
 
         private void OverrideAllMaterials(Transform parent)
@@ -294,46 +211,29 @@ namespace Netherlands3D.Tiles3D
             Destroy(this.gameObject);            
         }
 
+        //todo we need to come up with a way to get all used texture slot property names from the gltf package
         private void ClearRenderers(Renderer[] renderers)
         {
-            foreach(Renderer r in renderers)
+            foreach (Renderer r in renderers)
             {
-                //the order of destroying sharedmaterial before material matters for cleaning up native shells
-                UnityEngine.Material sharedMat = r.sharedMaterial;
-                if (sharedMat != null)
+                Material mat = r.sharedMaterial;
+                if (mat == null) continue;
+
+                int mainTexNameID = NL3DShaders.MainTextureShaderProperty;
+
+                if (mat.HasProperty(mainTexNameID))
                 {
-                    if (sharedMat.HasTexture("_MainTex"))
+                    Texture tex = mat.GetTexture(mainTexNameID);
+
+                    if (tex != null)
                     {
-                        UnityEngine.Texture tex = sharedMat.mainTexture;
-                        if (tex)
-                        {
-                            Destroy(tex);
-                        }
+                        mat.SetTexture(mainTexNameID, null);
+                        UnityEngine.Object.Destroy(tex);
+                        tex = null;
                     }
-
-                    sharedMat.SetTexture("_MainTex", null);
-                    sharedMat.shader = null;
-                    sharedMat.mainTexture = null;
-                    Destroy(sharedMat);
-                    r.sharedMaterial = null;
                 }
-
-                UnityEngine.Material mat = r.material;
-                if (mat != null)
-                {
-                    if (mat.HasTexture("_MainTex"))
-                    {
-                        UnityEngine.Texture tex = sharedMat.mainTexture;
-                        Destroy(tex);
-                    }
-
-                    mat.SetTexture("_MainTex", null);
-                    mat.shader = null;
-                    mat.mainTexture = null;
-                    Destroy(mat);
-                    r.material = null;
-                }
-                
+                UnityEngine.Object.Destroy(mat);
+                r.sharedMaterial = null;
             }
         }
     }

@@ -9,6 +9,8 @@ using System.Text;
 using System.Collections.Specialized;
 using UnityEngine.Events;
 using GLTFast;
+using Netherlands3D.Coordinates;
+
 
 
 #if UNITY_EDITOR
@@ -21,7 +23,8 @@ namespace Netherlands3D.Tiles3D
     public class Read3DTileset : MonoBehaviour
     {
         public string tilesetUrl = "https://storage.googleapis.com/ahp-research/maquette/kadaster/3dbasisvoorziening/test/landuse_1_1/tileset.json";
-
+        public CoordinateSystem contentCoordinateSystem = CoordinateSystem.WGS84_ECEF;
+       
         [Header("API Key (Optional)")]
         [Tooltip("Public API key for production use. This key will be used in production builds.")]
         public string publicKey;
@@ -74,6 +77,8 @@ namespace Netherlands3D.Tiles3D
 
         [Header("Optional material override")] public Material materialOverride;
 
+        [Header("Debugging")] public bool debugLog;
+        
         public string[] usedExtensions { get; private set; }
 
         //Custom WebRequestHeader dictionary
@@ -86,7 +91,8 @@ namespace Netherlands3D.Tiles3D
         [HideInInspector] public UnityEvent<UnityWebRequest> OnServerResponseReceived = new();
         [HideInInspector] public UnityEvent<UnityWebRequest.Result> OnServerRequestFailed = new();
         [HideInInspector] public UnityEvent<ContentMetadata> OnLoadAssetMetadata = new();
-
+        [HideInInspector] public UnityEvent<Content> OnTileLoaded = new();
+        
         public string CredentialQuery { get; private set; } = string.Empty;
         
         public void ClearKeyFromURL()
@@ -195,7 +201,8 @@ namespace Netherlands3D.Tiles3D
 
             ExtractDatasetPaths();
 
-            print("loading tilset from : " + tilesetUrl);
+            if(debugLog)
+                print("loading tilset from : " + tilesetUrl);
             StartCoroutine(LoadTileset());
         }
 
@@ -213,15 +220,21 @@ namespace Netherlands3D.Tiles3D
             }
 
             queryParameters = ParseQueryString(uri.Query);
-            Debug.Log($"Query url {ToQueryString(queryParameters)}");
+            
+            if(debugLog)
+                Debug.Log($"Query url {ToQueryString(queryParameters)}");
+    
             foreach (string segment in uri.Segments)
             {
                 if (segment.EndsWith(".json"))
                 {
                     tilesetFilename = segment;
-                    Debug.Log($"Dataset filename: {tilesetFilename}");
-                    Debug.Log($"Absolute path: {absolutePath}");
-                    Debug.Log($"Root path: {rootPath}");
+                    if (debugLog)
+                    {
+                        Debug.Log($"Dataset filename: {tilesetFilename}");
+                        Debug.Log($"Absolute path: {absolutePath}");
+                        Debug.Log($"Root path: {rootPath}");
+                    }
                     break;
                 }
             }
@@ -270,12 +283,12 @@ namespace Netherlands3D.Tiles3D
         /// <param name="tilesetUrl">The url pointing to tileset; https://.../tileset.json</param>
         /// <param name="maximumScreenSpaceError">The maximum screen space error for this tileset (default=5)</param>
         /// <param name="tilePrioritiser">Optional tile prioritisation system</param>
-        public void Initialize(string tilesetUrl, int maximumScreenSpaceError = 5, TilePrioritiser tilePrioritiser = null)
+        public void Initialize(string tilesetUrl,CoordinateSystem contentCoordinateystem = CoordinateSystem.WGS84_ECEF, int maximumScreenSpaceError = 5, TilePrioritiser tilePrioritiser = null)
         {
             currentCamera = Camera.main;
             this.tilesetUrl = tilesetUrl;
             this.maximumScreenSpaceError = maximumScreenSpaceError;
-
+            this.contentCoordinateSystem = contentCoordinateystem;
             SetTilePrioritiser(tilePrioritiser);
             RefreshTiles();
         }
@@ -358,9 +371,10 @@ namespace Netherlands3D.Tiles3D
             else
             {
                 string jsonstring = www.downloadHandler.text;
+                ParseTileset.DebugLog = debugLog;
                 ParseTileset.subtreeReader = GetComponent<ReadSubtree>();
                 JSONNode rootnode = JSON.Parse(jsonstring)["root"];
-                root = ParseTileset.ReadTileset(rootnode);
+                root = ParseTileset.ReadTileset(rootnode,this);
                 
                 var extensions = ParseTileset.GetUsedExtensions(rootnode);
                 usedExtensions = extensions.Item1;
@@ -387,8 +401,10 @@ namespace Netherlands3D.Tiles3D
                 tile.content.ParentTile = tile;
                 tile.content.uri = GetFullContentUri(tile);
                 tile.content.parseAssetMetaData = parseAssetMetadata;
+                tile.content.onTileLoadCompleted.AddListener(OnTileLoaded.Invoke);
 #if SUBOBJECT
                 tile.content.parseSubObjects = parseSubObjects;
+                tile.content.contentcoordinateSystem = contentCoordinateSystem;
 #endif
 
                 //Request tile content update via optional prioritiser, or load directly
@@ -399,7 +415,7 @@ namespace Netherlands3D.Tiles3D
                 }
                 else
                 {
-                    tile.content.Load(materialOverride);
+                    tile.content.Load(materialOverride, verbose:debugLog);
                 }
             }
         }
@@ -742,6 +758,26 @@ namespace Netherlands3D.Tiles3D
                 var coverage = 2 * Mathf.Tan((Mathf.Deg2Rad * currentCamera.fieldOfView) / 2);
                 sseComponent = screenHeight / coverage;
             }
+        }
+
+        public void SetCoordinateSystem(CoordinateSystem newContentCoordinateSystem)
+        {
+            contentCoordinateSystem = newContentCoordinateSystem;
+            ScenePosition[] scenepositions = GetComponentsInChildren<ScenePosition>();
+            foreach (ScenePosition scenepos in scenepositions)
+            {
+                if ((int)newContentCoordinateSystem == scenepos.contentposition.CoordinateSystem)
+                {
+                    continue;
+                }
+                Coordinate newCoord = new Coordinate(newContentCoordinateSystem);
+                newCoord.easting = scenepos.contentposition.easting;
+                newCoord.northing = scenepos.contentposition.northing;
+                newCoord.height = scenepos.contentposition.height;
+                scenepos.contentposition = newCoord;
+                scenepos.gameObject.transform.position = newCoord.ToUnity();
+            }
+            InvalidateBounds();
         }
     }
 
