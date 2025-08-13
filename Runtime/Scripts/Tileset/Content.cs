@@ -31,7 +31,8 @@ namespace Netherlands3D.Tiles3D
 
         private UnityEngine.Material overrideMaterial;
 
-        private GltfImport gltf;
+ 
+        public ParsedGltf ParsedGltf;
         Dictionary<string, string> headers = null;
         public enum ContentLoadState
         {
@@ -178,9 +179,9 @@ namespace Netherlands3D.Tiles3D
            
             State = ContentLoadState.DOWNLOADED;
 
-            if (gltf != null)
+            if (ParsedGltf != null)
             {
-                gltf.Dispose();     
+                ParsedGltf.Dispose();     
             }
 
             if (overrideMaterial == null)

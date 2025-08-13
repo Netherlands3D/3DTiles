@@ -18,8 +18,8 @@ namespace Netherlands3D.Tiles3D
             
             var materialGenerator = new NL3DMaterialGenerator();
             GltfImport gltf = new GltfImport(null, null, materialGenerator, consoleLogger);
-            
             var success = true;
+
             Uri uri = null;
             if (sourcePath != "")
             {
@@ -49,11 +49,19 @@ namespace Netherlands3D.Tiles3D
             };
             await parsedGltf.SpawnGltfScenes(containerTransform);
 
+            Content content = containerTransform.GetComponent<Content>();
+            if (content == null)
+            {
+                content = containerTransform.gameObject.AddComponent<Content>();
+            }
+            content.ParsedGltf = parsedGltf;
+
+
             containerTransform.gameObject.name = sourcePath;
 
             if (parseAssetMetaData)
             {
-                Content content = containerTransform.GetComponent<Content>();
+                content = containerTransform.GetComponent<Content>();
                 if (content != null)
                 {
                     // parsedGltf.ParseAssetMetaData(content);

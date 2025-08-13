@@ -476,5 +476,28 @@ namespace Netherlands3D.Tiles3D
                 renderer.material = overrideMaterial;
             }
         }
+
+        public void Dispose()
+        {
+            // Best eerst glTFast opruimen
+            if (gltfImport != null)
+            {
+                gltfImport.Dispose();
+                gltfImport = null;
+            }
+            // BELANGRIJK: alle NativeArray’s vrijgeven
+            if (glbBufferNative.IsCreated)
+            {
+                glbBufferNative.Dispose();
+            }
+            if (destination.IsCreated)
+            {
+                destination.Dispose();
+            }
+            // Slices/refs resetten
+            source = default;
+            // Managed buffers loslaten
+            glbBuffer = null;
+        }
     }
 }
