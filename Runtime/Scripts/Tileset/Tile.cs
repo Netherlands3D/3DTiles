@@ -461,7 +461,7 @@ namespace Netherlands3D.Tiles3D
                 {
                     child.parent = null;
                     child.DestroyChildrenInNestedTileset();
-                    child.Dispose;
+                    child.Dispose();
                 }
                 
                 children.Clear();
