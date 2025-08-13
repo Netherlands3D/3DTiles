@@ -455,7 +455,7 @@ namespace Netherlands3D.Tiles3D
                 {
                     LoadInViewRecursively(child, currentCamera);
                 }
-
+                RemoveUnusedNestedTilesets();
                 yield return null;
             }
         }
@@ -566,6 +566,7 @@ namespace Netherlands3D.Tiles3D
             var tileIsInView = tile.IsInViewFrustrum(currentCamera);
             if (!tileIsInView)
             {
+
                 return;
             }
 
@@ -682,6 +683,11 @@ namespace Netherlands3D.Tiles3D
             {
                 //Possible future nested subtree support.
             }
+        }
+
+        private void RemoveUnusedNestedTilesets()
+        {
+            root.DestroyChildrenInNestedTileset();
         }
 
         private string GetFullContentUri(Tile tile)

@@ -452,6 +452,21 @@ namespace Netherlands3D.Tiles3D
             return result;
         }
 
+        public void DestroyChildrenInNestedTileset()
+        {
+            if (isLoading) return;
+            if (contentUri.Contains(".json") || contentUri.Contains(".subtree"))
+            {
+                foreach (var child in children)
+                {
+                    child.parent = null;
+                    child.DestroyChildrenInNestedTileset();
+                }
+                children.Clear();
+            }
+           
+        }
+
         public void Dispose()
         {
             if (content != null)
