@@ -40,37 +40,56 @@ namespace Netherlands3D.Tiles3D
                 return true;
             }
         }
-        public static IEnumerator DownloadContent(string url, Transform containerTransform, Tile tile, Action<byte[],string> Callback, bool parseAssetMetaData = false, bool parseSubObjects = false, UnityEngine.Material overrideMaterial = null, bool bypassCertificateValidation = false, Dictionary<string, string> customHeaders = null)
+        //public static IEnumerator DownloadContent(string url, Transform containerTransform, Tile tile, Action<byte[], string> Callback, bool parseAssetMetaData = false, bool parseSubObjects = false, UnityEngine.Material overrideMaterial = null, bool bypassCertificateValidation = false, Dictionary<string, string> customHeaders = null)
+        public static IEnumerator DownloadContent(string url,
+        Transform containerTransform,
+        Tile tile,
+        Func<byte[], string, Task> Callback,
+        bool parseAssetMetaData = false,
+        bool parseSubObjects = false,
+        UnityEngine.Material overrideMaterial = null,
+        bool bypassCertificateValidation = false,
+        Dictionary<string, string> customHeaders = null)
+
         {
-            if(debugLog)
+            if (debugLog)
                 Debug.Log("starting download");
-            
+
             #region download data
-            var webRequest = UnityWebRequest.Get(url);
-            if (customHeaders != null)
+
+            using (var webRequest = UnityWebRequest.Get(url))
             {
-                foreach (var header in customHeaders)
-                    webRequest.SetRequestHeader(header.Key, header.Value);
+                if (customHeaders != null)
+                {
+                    foreach (var header in customHeaders)
+                        webRequest.SetRequestHeader(header.Key, header.Value);
+                }
+
+                if (bypassCertificateValidation)
+                    webRequest.certificateHandler = customCertificateHandler; //Not safe; but solves breaking curl error
+
+                yield return webRequest.SendWebRequest();
+
+                if (webRequest.result != UnityWebRequest.Result.Success)
+                {
+                    Debug.LogWarning(url + " -> " + webRequest.error);
+                    Callback.Invoke(null, url);
+                    yield break;
+                }
+                #endregion
+                byte[] contentBytes = webRequest.downloadHandler.data;
+
+                if (debugLog)
+                    Debug.Log("downloaded data");
+
+                //Callback.Invoke(contentBytes, url);
+                Task task = Callback.Invoke(contentBytes, url);
+                while (!task.IsCompleted)
+                {
+                    yield return null;
+                }
+
             }
-
-            if (bypassCertificateValidation)
-                webRequest.certificateHandler = customCertificateHandler; //Not safe; but solves breaking curl error
-
-            yield return webRequest.SendWebRequest();
-
-            if (webRequest.result != UnityWebRequest.Result.Success)
-            {
-                Debug.LogWarning(url + " -> " + webRequest.error);
-                Callback.Invoke(null,url);
-                yield break;
-            }
-            #endregion
-            byte[] contentBytes = webRequest.downloadHandler.data;
-            
-            if(debugLog)
-                Debug.Log("downloaded data");
-    
-            Callback.Invoke(contentBytes, url);
         }
 
         public static async Task LoadContent(byte[] contentBytes,string sourceUri, Transform containerTransform, Tile tile, Action<bool> succesCallback, bool parseAssetMetaData = false, bool parseSubObjects = false, UnityEngine.Material overrideMaterial = null, bool bypassCertificateValidation = false, Dictionary<string, string> customHeaders = null)

@@ -19,7 +19,7 @@ using Netherlands3D.SubObjects;
 namespace Netherlands3D.Tiles3D
 {
     [Serializable]
-    public class ParsedGltf
+    public class ParsedGltf : IDisposable
     {
         public GltfImport gltfImport;
         public byte[] glbBuffer;
@@ -37,7 +37,7 @@ namespace Netherlands3D.Tiles3D
         public bool isSupported()
         {
             ReadGLTFJson();
-            if (gltfJsonRoot==null)
+            if (gltfJsonRoot == null)
             {
                 Debug.LogError("gltf doesn't contain a valid JSON");
                 return false;
@@ -61,7 +61,7 @@ namespace Netherlands3D.Tiles3D
             }
             if (cesiumRTCIndex < 0)
             {
-                return true ;
+                return true;
             }
 
 
@@ -102,7 +102,7 @@ namespace Netherlands3D.Tiles3D
             if (gltfImport != null)
             {
                 Content parentContent = parent.GetComponent<Content>();
-                if (parentContent!=null)
+                if (parentContent != null)
                 {
                     tile = parentContent.ParentTile;
                 }
@@ -172,7 +172,7 @@ namespace Netherlands3D.Tiles3D
             };
 
             //get the transformation of the created gameObject in 3dTile-space
-            TileTransform geometryInECEF = yUpToZUp*gltFastToGLTF * basistransform;
+            TileTransform geometryInECEF = yUpToZUp * gltFastToGLTF * basistransform;
 
             //apply the tileTransform
             TileTransform geometryInCRS = tile.tileTransform * geometryInECEF;
@@ -183,7 +183,7 @@ namespace Netherlands3D.Tiles3D
                 m01 = 1d,   //unityX = ecefY
                 m12 = 1d,   //unity = ecefZ
                 m20 = -1d,  //unityZ = ecef-x
-                m33=1d
+                m33 = 1d
             };
 
             // move the transformation to Unity-space
@@ -208,9 +208,9 @@ namespace Netherlands3D.Tiles3D
                 m23 = 0f,
 
                 m30 = 0f,
-                m31=0f,
-                m32=0f,
-                m33=1f
+                m31 = 0f,
+                m32 = 0f,
+                m33 = 1f
             };
             Vector3 translation;
             Vector3 scale;
@@ -222,7 +222,7 @@ namespace Netherlands3D.Tiles3D
             Coordinate sceneCoordinate = new Coordinate(tile.content.contentcoordinateSystem, geometryInCRS.m03, geometryInCRS.m13, geometryInCRS.m23);
             if (rtcCenter != null)
             {
-                sceneCoordinate = new Coordinate(tile.content.contentcoordinateSystem, rtcCenter[0], rtcCenter[1], rtcCenter[2])+sceneCoordinate;
+                sceneCoordinate = new Coordinate(tile.content.contentcoordinateSystem, rtcCenter[0], rtcCenter[1], rtcCenter[2]) + sceneCoordinate;
             }
 
             /// TEMPORARY FIX
@@ -231,14 +231,14 @@ namespace Netherlands3D.Tiles3D
             /// until that time, we rotate by 90 degrees around the up-axis to counter the applied rotation
             rotation = Quaternion.AngleAxis(90, Vector3.up) * rotation;
             tile.content.contentCoordinate = sceneCoordinate;
-            
+
             //apply scale, position and rotation to the gameobject
             scene.localScale = scale;
             ScenePosition scenepos = scene.gameObject.AddComponent<ScenePosition>();
             scenepos.contentposition = sceneCoordinate;
             scene.position = sceneCoordinate.ToUnity();
             scene.rotation = sceneCoordinate.RotationToLocalGravityUp() * rotation;
-            
+
 
         }
         public void ParseAssetMetaData(Content content)
@@ -306,8 +306,8 @@ namespace Netherlands3D.Tiles3D
             for (int i = 0; i < featureIdBuffer.Length; i += stride)
             {
                 //TODO: Read componentType from accessor to determine how to read the featureTableIndex
-                var featureTableIndex = (int)BitConverter.ToSingle(featureIdBuffer, i+accessorOffset); 
-                
+                var featureTableIndex = (int)BitConverter.ToSingle(featureIdBuffer, i + accessorOffset);
+
                 if (currentFeatureTableIndex != featureTableIndex)
                 {
                     if (currentFeatureTableIndex != -1)
@@ -356,7 +356,7 @@ namespace Netherlands3D.Tiles3D
 
             foreach (Transform child in parent)
             {
-                Debug.Log(child.name,child.gameObject);
+                Debug.Log(child.name, child.gameObject);
                 //Add subobjects to the spawned gameobject
                 child.gameObject.AddComponent<MeshCollider>();
                 ObjectMapping objectMapping = child.gameObject.AddComponent<ObjectMapping>();
@@ -368,7 +368,7 @@ namespace Netherlands3D.Tiles3D
                 {
                     var uniqueFeatureId = vertexFeatureIds[i];
                     var bagId = bagIdList[uniqueFeatureId.x];
-                    
+
                     //Remove any prefixes/additions to the bag id
                     bagId = Regex.Replace(bagId, "[^0-9]", "");
 
@@ -398,7 +398,7 @@ namespace Netherlands3D.Tiles3D
 
             //Create NativeSlice as part of the glbBuffer that the view is covering
             source = glbBufferNative.Slice((int)byteOffset, (int)byteLength);
-            if(!decompress)
+            if (!decompress)
             {
                 //Convert slice to byte[] array
                 Debug.Log("Use buffer directly");
@@ -406,7 +406,7 @@ namespace Netherlands3D.Tiles3D
             }
             Debug.Log("Decompress buffer");
             var byteStride = bufferView.extensions.EXT_meshopt_compression.byteStride;
-            var count = bufferView.extensions.EXT_meshopt_compression.count;   
+            var count = bufferView.extensions.EXT_meshopt_compression.count;
 
             //Create NativeArray to store the decompressed buffer
             destination = new NativeArray<byte>(count * byteStride, Allocator.Persistent);
@@ -475,6 +475,42 @@ namespace Netherlands3D.Tiles3D
             {
                 renderer.material = overrideMaterial;
             }
+        }
+
+        // public void Dispose()
+        // {
+
+
+        //     if (gltfImport != null)
+        //     {
+        //       //  Debug.Log("parsedGltf gltfImport.Dispose() called ");
+        //         gltfImport.Dispose();
+        //     }
+
+        //     //gltfImport?.Dispose();
+        // }
+        
+        public void Dispose()
+        {
+            // Best eerst glTFast opruimen
+            if (gltfImport != null) {
+                gltfImport.Dispose();
+                gltfImport = null;
+            }
+
+            // BELANGRIJK: alle NativeArray’s vrijgeven
+            if (glbBufferNative.IsCreated) {
+                glbBufferNative.Dispose();
+            }
+            if (destination.IsCreated) {
+                destination.Dispose();
+            }
+
+            // Slices/refs resetten
+            source = default;
+
+            // Managed buffers loslaten
+            glbBuffer = null;
         }
     }
 }

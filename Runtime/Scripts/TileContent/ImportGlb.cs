@@ -48,12 +48,19 @@ namespace Netherlands3D.Tiles3D
                 rtcCenter = rtcCenter,
             };
             await parsedGltf.SpawnGltfScenes(containerTransform);
+            
+            Content content = containerTransform.GetComponent<Content>();
+            if (content == null)
+            {
+                content = containerTransform.gameObject.AddComponent<Content>();
+            }
+            content.parsedGltf = parsedGltf;
 
             containerTransform.gameObject.name = sourcePath;
 
             if (parseAssetMetaData)
             {
-                Content content = containerTransform.GetComponent<Content>();
+                //Content content = containerTransform.GetComponent<Content>();
                 if (content != null)
                 {
                     // parsedGltf.ParseAssetMetaData(content);

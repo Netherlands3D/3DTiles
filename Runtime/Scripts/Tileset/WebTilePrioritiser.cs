@@ -60,10 +60,12 @@ namespace Netherlands3D.Tiles3D
         /// <summary>
         /// If a tile completed loading, recalcule priorities
         /// </summary>
-        private void TileCompletedLoading()
+        private void TileCompletedLoading(Tile tile)
         {
+            tile.content.onDoneDownloading.RemoveListener(TileCompletedLoading);
             requirePriorityCheck = true;
         }
+
 
         /// <summary>
         /// Request update for this tile by adding it to the prioritised tile list.
@@ -83,6 +85,8 @@ namespace Netherlands3D.Tiles3D
         /// </summary>
         public override void RequestDispose(Tile tile, bool immediately=false)
         {
+            tile.requestDispose = true;
+            
             PrioritisedTiles.Remove(tile);
             requirePriorityCheck = true;
 
@@ -136,13 +140,40 @@ namespace Netherlands3D.Tiles3D
         }
         
 
+// Helper: recursief alle children verzamelen
+private List<Tile> GetAllChildrenRecursive(Tile tile)
+{
+    List<Tile> result = new List<Tile>();
+    foreach (var child in tile.children)
+    {
+        result.Add(child);
+        result.AddRange(GetAllChildrenRecursive(child));
+    }
+    return result;
+}
+
+
         /// <summary>
         /// Directly dispose this tile content
         /// </summary>
         public void Dispose(Tile tile)
         {
-            
-           
+
+            List<Tile> allChildren = GetAllChildrenRecursive(tile);
+
+            // Verwijder alle children uit lijsten
+            foreach (var child in allChildren)
+            {
+                prioritisedTiles.Remove(child);
+                delayedDisposeList.Remove(child);
+            }
+
+            allChildren.Clear();
+
+
+            prioritisedTiles.Remove(tile);
+            delayedDisposeList.Remove(tile);
+
             tile.Dispose();
             tile.requestedUpdate = false;
             tile.requestedDispose = false;

@@ -1,14 +1,38 @@
 using Netherlands3D.Coordinates;
+//using PlasticPipe.PlasticProtocol.Messages;
 using System;
 using System.Collections.Generic;
 using UnityEngine;
 
 namespace Netherlands3D.Tiles3D
 {
-   [System.Serializable]
+    [System.Serializable]
     public class Tile : IDisposable
     {
-       
+
+        public bool disposed;
+
+        public bool requestDispose;
+
+        public bool visibleTileCheckedNotInView = false;
+
+        public bool suspiciousBottomLeft = false;
+
+        public int suspiciousCounter = 0;
+
+        public bool rootIsInView = false;
+
+        public bool isRoot = false;
+        public bool isRootChild = false;
+
+        public void setRootChild() {
+            foreach (var child in children)
+            {
+                child.isRootChild = true;
+                child.setRootChild();
+            }
+        }
+
 
         //implicit tiling properties
         public int level;
@@ -36,10 +60,15 @@ namespace Netherlands3D.Tiles3D
         internal bool nestedTilesLoaded = false;
         public bool isLoading = false;
 
+
+
         // tiletree properties
         public Tile parent;
+
+        public bool HasParent;
+
         [SerializeField] public List<Tile> children = new List<Tile>();
-        
+
 
         //tileproperties
 
@@ -50,6 +79,13 @@ namespace Netherlands3D.Tiles3D
         public string refine;
         public string contentUri = "";
         public Content content; //Gltf content
+
+        public static Action<Tile> OnTileCreated;
+
+        public Tile()
+        {
+            OnTileCreated?.Invoke(this);
+        }
 
         public int CountLoadingChildren()
         {
@@ -72,15 +108,15 @@ namespace Netherlands3D.Tiles3D
                     }
                 }
             }
-           
-            
+
+
             return result;
         }
         public int loadedChildren;
         public int CountLoadedChildren()
         {
             int result = 0;
-            if (refine=="ADD")
+            if (refine == "ADD")
             {
                 return 0;
             }
@@ -99,10 +135,10 @@ namespace Netherlands3D.Tiles3D
                     }
                 }
             }
-                foreach (var childTile in children)
-                {
-                    result += childTile.CountLoadedChildren();
-                }
+            foreach (var childTile in children)
+            {
+                result += childTile.CountLoadedChildren();
+            }
             loadedChildren = result;
             return result;
         }
@@ -114,7 +150,7 @@ namespace Netherlands3D.Tiles3D
                 return 1;
             }
             int result = 0;
-            if (parent !=null)
+            if (parent != null)
             {
                 if (parent.content != null)
                 {
@@ -127,8 +163,8 @@ namespace Netherlands3D.Tiles3D
                     }
                 }
             }
-           
-            if (parent !=null)
+
+            if (parent != null)
             {
                 return result + parent.CountLoadedParents();
             }
@@ -196,7 +232,8 @@ namespace Netherlands3D.Tiles3D
 
         public bool ChildrenHaveContent()
         {
-            if (children.Count > 0) { 
+            if (children.Count > 0)
+            {
                 foreach (var child in children)
                 {
                     if (!child.content || child.content.State != Content.ContentLoadState.DOWNLOADED) return false;
@@ -218,40 +255,66 @@ namespace Netherlands3D.Tiles3D
             return maxDepth;
         }
 
-        public enum TileStatus
-        {
-            unloaded,
-            loaded
-        }
+        // public enum TileStatus
+        // {
+        //     unloaded,
+        //     loaded
+        // }
 
+        public int isInViewCounter = 0;
 
 
         public bool IsInViewFrustrum(Camera ofCamera)
         {
+            isInViewCounter++;
+
             if (!boundsAvailable && boundsAreValid)
             {
-                if (boundingVolume.values.Length>0)
+                if (boundingVolume.values.Length > 0)
                 {
                     CalculateUnitBounds();
                 }
                 else
                 {
-                    inView = false ;
+                    inView = false;
                 }
-                
+
             }
+
+
+
+
             if (boundsAvailable)
             {
+
+                suspiciousBottomLeft = AllApproximatelyEqual(BottomLeft.value1, BottomLeft.value2, BottomLeft.value3);
+                if (suspiciousBottomLeft) suspiciousCounter++;
+
+
+
                 inView = false;
-                if (IsPointInbounds(new Coordinate(ofCamera.transform.position).Convert(tileSet.contentCoordinateSystem),8000d))
+                if (IsPointInbounds(new Coordinate(ofCamera.transform.position).Convert(tileSet.contentCoordinateSystem), 8000d))
                 {
-                    inView= ofCamera.InView(unityBounds);
+                    inView = ofCamera.InView(unityBounds);
                 }
-                
+
             }
-            
+
             return inView;
         }
+
+        const double Tolerance = 1e-9;
+        bool Approximately(double a, double b)
+        {
+            return Math.Abs(a - b) < Tolerance;
+        }
+
+        bool AllApproximatelyEqual(double v1, double v2, double v3)
+        {
+            return Approximately(v1, v2) && Approximately(v2, v3);
+        }
+
+
 
         bool IsPointInbounds(Coordinate point, double margin)
         {
@@ -306,7 +369,7 @@ namespace Netherlands3D.Tiles3D
                     Coordinate Yaxis = new Coordinate(tileSet.contentCoordinateSystem, boundingVolume.values[6], boundingVolume.values[7], boundingVolume.values[8]);
                     Coordinate Zaxis = new Coordinate(tileSet.contentCoordinateSystem, boundingVolume.values[9], boundingVolume.values[10], boundingVolume.values[11]);
 
-                    
+
 
 
                     unityBounds = new Bounds();
@@ -316,7 +379,7 @@ namespace Netherlands3D.Tiles3D
                     unityBounds.Encapsulate((boxCenterEcef + Xaxis + Yaxis - Zaxis).ToUnity());
                     unityBounds.Encapsulate((boxCenterEcef + Xaxis - Yaxis + Zaxis).ToUnity());
                     unityBounds.Encapsulate((boxCenterEcef + Xaxis - Yaxis - Zaxis).ToUnity());
-                    
+
                     unityBounds.Encapsulate((boxCenterEcef - Xaxis + Yaxis + Zaxis).ToUnity());
                     unityBounds.Encapsulate((boxCenterEcef - Xaxis - Yaxis + Zaxis).ToUnity());
 
@@ -324,10 +387,10 @@ namespace Netherlands3D.Tiles3D
                     unityBounds.Encapsulate((boxCenterEcef - Xaxis - Yaxis - Zaxis).ToUnity());
 
 
-                    double deltaX =  Math.Abs(Xaxis.value1) + Math.Abs(Yaxis.value1) + Math.Abs(Zaxis.value1);
+                    double deltaX = Math.Abs(Xaxis.value1) + Math.Abs(Yaxis.value1) + Math.Abs(Zaxis.value1);
                     double deltaY = Math.Abs(Xaxis.value2) + Math.Abs(Yaxis.value2) + Math.Abs(Zaxis.value2);
                     double deltaZ = Math.Abs(Xaxis.value3) + Math.Abs(Yaxis.value3) + Math.Abs(Zaxis.value3);
-                    BottomLeft = new Coordinate(tileSet.contentCoordinateSystem, boxCenterEcef.value1-deltaX, boxCenterEcef.value2 - deltaY, boxCenterEcef.value3 - deltaZ);
+                    BottomLeft = new Coordinate(tileSet.contentCoordinateSystem, boxCenterEcef.value1 - deltaX, boxCenterEcef.value2 - deltaY, boxCenterEcef.value3 - deltaZ);
                     TopRight = new Coordinate(tileSet.contentCoordinateSystem, boxCenterEcef.value1 + deltaX, boxCenterEcef.value2 + deltaY, boxCenterEcef.value3 + deltaZ);
 
 
@@ -335,8 +398,8 @@ namespace Netherlands3D.Tiles3D
                 case BoundingVolumeType.Sphere:
                     var sphereRadius = boundingVolume.values[0];
                     var sphereCentre = CoordinateConverter.ECEFToUnity(new Vector3ECEF(boundingVolume.values[0], boundingVolume.values[1], boundingVolume.values[2]));
-                    var sphereMin = CoordinateConverter.ECEFToUnity(new Vector3ECEF(boundingVolume.values[0]- sphereRadius, boundingVolume.values[1] - sphereRadius, boundingVolume.values[2] - sphereRadius));
-                    var sphereMax = CoordinateConverter.ECEFToUnity(new Vector3ECEF(boundingVolume.values[0]+ sphereRadius, boundingVolume.values[1]+ sphereRadius, boundingVolume.values[2]+ sphereRadius));
+                    var sphereMin = CoordinateConverter.ECEFToUnity(new Vector3ECEF(boundingVolume.values[0] - sphereRadius, boundingVolume.values[1] - sphereRadius, boundingVolume.values[2] - sphereRadius));
+                    var sphereMax = CoordinateConverter.ECEFToUnity(new Vector3ECEF(boundingVolume.values[0] + sphereRadius, boundingVolume.values[1] + sphereRadius, boundingVolume.values[2] + sphereRadius));
                     unityBounds.size = Vector3.zero;
                     unityBounds.center = sphereCentre;
                     unityBounds.Encapsulate(sphereMin);
@@ -357,12 +420,12 @@ namespace Netherlands3D.Tiles3D
                     var maxcoord = new Coordinate(CoordinateSystem.WGS84_LatLonHeight, South, West, minHeight).Convert(CoordinateSystem.WGS84_ECEF);
 
                     var coord = new Coordinate(CoordinateSystem.WGS84_LatLonHeight, South, West, MaxHeight).Convert(CoordinateSystem.WGS84_ECEF);
-                    if (coord.easting<mincoord.easting) mincoord.easting = coord.easting;
-                    if (coord.northing<mincoord.northing) mincoord.northing = coord.northing;
+                    if (coord.easting < mincoord.easting) mincoord.easting = coord.easting;
+                    if (coord.northing < mincoord.northing) mincoord.northing = coord.northing;
                     if (coord.height < mincoord.height) mincoord.height = coord.height;
-                    if (coord.easting >maxcoord.easting) maxcoord.easting = coord.easting;
-                    if (coord.northing>maxcoord.northing) maxcoord.northing = coord.northing;
-                    if (coord.height >maxcoord.height) maxcoord.height = coord.height;
+                    if (coord.easting > maxcoord.easting) maxcoord.easting = coord.easting;
+                    if (coord.northing > maxcoord.northing) maxcoord.northing = coord.northing;
+                    if (coord.height > maxcoord.height) maxcoord.height = coord.height;
 
                     coord = new Coordinate(CoordinateSystem.WGS84_LatLonHeight, South, East, minHeight).Convert(CoordinateSystem.WGS84_ECEF);
                     if (coord.easting < mincoord.easting) mincoord.easting = coord.easting;
@@ -432,33 +495,60 @@ namespace Netherlands3D.Tiles3D
         public float getParentSSE()
         {
             float result = 0;
-            if (parent!=null)
+            if (parent != null)
             {
 
-            
-            
-            if (parent.content!=null)
-            {
-                if (parent.content.State==Content.ContentLoadState.DOWNLOADED)
+
+
+                if (parent.content != null)
                 {
-                    result = parent.screenSpaceError;
+                    if (parent.content.State == Content.ContentLoadState.DOWNLOADED)
+                    {
+                        result = parent.screenSpaceError;
+                    }
                 }
-            }
-            if (result==0)
-            {
+                if (result == 0)
+                {
                     result = parent.getParentSSE();
-            }
+                }
             }
             return result;
         }
 
+        void DestroyChildren()
+        {
+            foreach (var child in children)
+            {
+                child.parent = null;
+                child.DestroyChildren();
+            }
+            children.Clear();
+        }
+
         public void Dispose()
         {
+            disposed = true;
+
+            // foreach (var child in children)
+            // {
+            //     child.parent = null;
+            //     child.Dispose();
+            // }
+            // children.Clear();
+            // parent = null;
+
             if (content != null)
             {
+                // content.tilesetReader.visibleTiles.Remove(this); 
+
                 content.Dispose();
                 content = null;
             }
+        }
+
+        ~Tile()
+        {
+            Debug.Log($"tile finalized parentisnull:{parent == null} childrencount:{children.Count}");
         }
     }
 }
