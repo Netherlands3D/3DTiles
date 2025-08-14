@@ -529,13 +529,13 @@ namespace Netherlands3D.Tiles3D
         {
             disposed = true;
 
-            // foreach (var child in children)
-            // {
-            //     child.parent = null;
-            //     child.Dispose();
-            // }
-            // children.Clear();
-            // parent = null;
+            foreach (var child in children)
+            {
+                child.parent = null;
+                child.Dispose();
+            }
+            children.Clear();
+            parent = null;
 
             if (content != null)
             {

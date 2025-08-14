@@ -92,6 +92,7 @@ namespace Netherlands3D.Tiles3D
         [HideInInspector] public UnityEvent<UnityWebRequest> OnServerResponseReceived = new();
         [HideInInspector] public UnityEvent<UnityWebRequest.Result> OnServerRequestFailed = new();
         [HideInInspector] public UnityEvent<ContentMetadata> OnLoadAssetMetadata = new();
+        [HideInInspector] public UnityEvent<Content> OnTileLoaded = new();
 
         public string CredentialQuery { get; private set; } = string.Empty;
         
