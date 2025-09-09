@@ -41,39 +41,114 @@ namespace Netherlands3D.Tiles3D
                 succesCallback.Invoke(false);
                 return;
             }
+            
+            // Validate data before processing
+            if (data == null || data.Length == 0)
+            {
+                Debug.LogError("GLB data is null or empty");
+                succesCallback.Invoke(false);
+                return;
+            }
+
             double[] rtcCenter = GetRTCCenterFromGlb(data);
             var parsedGltf = new ParsedGltf()
             {
                 gltfImport = gltf,
                 rtcCenter = rtcCenter,
             };
-            await parsedGltf.SpawnGltfScenes(containerTransform);
 
-            containerTransform.gameObject.name = sourcePath;
-
-            if (parseAssetMetaData)
+            try
             {
-                Content content = containerTransform.GetComponent<Content>();
-                if (content != null)
+                // Check if containerTransform is still valid before proceeding
+                if (containerTransform == null)
                 {
-                    // parsedGltf.ParseAssetMetaData(content);
+                    Debug.LogWarning("Container transform is null, canceling GLB processing");
+                    succesCallback.Invoke(false);
+                    return;
                 }
 
-            }
+                // Additional validation before spawning scenes
+                if (parsedGltf.gltfImport == null)
+                {
+                    Debug.LogError("GltfImport is null, cannot spawn scenes");
+                    succesCallback.Invoke(false);
+                    return;
+                }
 
-            //Check if mesh features addon is used to define subobjects
+                // Add timeout to prevent hanging
+                var timeout = System.TimeSpan.FromSeconds(30); // 30 second timeout
+                using (var cts = new System.Threading.CancellationTokenSource(timeout))
+                {
+                    try
+                    {
+                        await parsedGltf.SpawnGltfScenes(containerTransform);
+                    }
+                    catch (System.OperationCanceledException)
+                    {
+                        Debug.LogError("GLB processing timed out after 30 seconds");
+                        succesCallback.Invoke(false);
+                        return;
+                    }
+                }
+
+                // Check again after async operation in case transform was destroyed
+                if (containerTransform == null)
+                {
+                    Debug.LogWarning("Container transform destroyed during GLB processing");
+                    succesCallback.Invoke(false);
+                    return;
+                }
+
+                containerTransform.gameObject.name = sourcePath;
+
+                // Register GltfImport with Content for later disposal
+                Content content = containerTransform.GetComponent<Content>();
+                if (content == null)
+                {
+                    Debug.LogWarning("Content component destroyed during GLB processing");
+                    succesCallback.Invoke(false);
+                    return;
+                }
+                
+                content.RegisterGltfImport(gltf);
+
+                if (parseAssetMetaData)
+                {
+                    if (content != null)
+                    {
+                        // parsedGltf.ParseAssetMetaData(content);
+                    }
+
+                }
+
+                //Check if mesh features addon is used to define subobjects
 #if SUBOBJECT
-            if (parseSubObjects)
-            {
-                // parsedGltf.ParseSubObjects(containerTransform);
-            }
+                if (parseSubObjects)
+                {
+                    // parsedGltf.ParseSubObjects(containerTransform);
+                }
 #endif
 
-            if (overrideMaterial != null)
-            {
-                parsedGltf.OverrideAllMaterials(overrideMaterial);
+                if (overrideMaterial != null)
+                {
+                    parsedGltf.OverrideAllMaterials(overrideMaterial);
+                }
+
+                succesCallback.Invoke(true);
             }
-            succesCallback.Invoke(true);
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"Error processing GLB content: {ex.Message}");
+                succesCallback.Invoke(false);
+            }
+            finally
+            {
+                // Dispose NativeArrays but keep GltfImport alive for Unity to use
+                if (parsedGltf != null)
+                {
+                    parsedGltf.DisposeNativeArrays();
+                }
+            }
         }
        
         private static double[] GetRTCCenterFromGlb(byte[] GlbData)

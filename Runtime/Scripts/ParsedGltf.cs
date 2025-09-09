@@ -98,8 +98,27 @@ namespace Netherlands3D.Tiles3D
 
         public async Task SpawnGltfScenes(Transform parent)
         {
+            if (parent == null)
+            {
+                Debug.LogError("SpawnGltfScenes: parent Transform is null");
+                return;
+            }
+
+            // Additional Unity null check (handles destroyed objects)
+            if (parent == null)
+            {
+                Debug.LogError("SpawnGltfScenes: parent Transform has been destroyed");
+                return;
+            }
+
             parentTransform = parent;
-            if (gltfImport != null)
+            if (gltfImport == null)
+            {
+                Debug.LogError("SpawnGltfScenes: gltfImport is null");
+                return;
+            }
+
+            try
             {
                 Content parentContent = parent.GetComponent<Content>();
                 if (parentContent!=null)
@@ -107,26 +126,108 @@ namespace Netherlands3D.Tiles3D
                     tile = parentContent.ParentTile;
                 }
 
+                if (tile == null)
+                {
+                    Debug.LogWarning("SpawnGltfScenes: Could not find parent Tile, positioning may be incorrect");
+                }
+
                 var scenes = gltfImport.SceneCount;
 
                 //Spawn all scenes (InstantiateMainSceneAsync only possible if main scene was referenced in gltf)
                 for (int i = 0; i < scenes; i++)
                 {
-                    await gltfImport.InstantiateSceneAsync(parent, i);
+                    // Check if parent still exists before each async call (Unity's == operator handles destroyed objects)
+                    if (parent == null) 
+                    {
+                        Debug.LogWarning($"SpawnGltfScenes: parent Transform destroyed during scene {i} instantiation");
+                        return;
+                    }
+
+                    try
+                    {
+                        // Additional validation before calling GLTFast
+                        if (gltfImport == null)
+                        {
+                            Debug.LogError($"SpawnGltfScenes: gltfImport became null during scene {i} processing");
+                            return;
+                        }
+
+                        await gltfImport.InstantiateSceneAsync(parent, i);
+                    }
+                    catch (System.NullReferenceException ex)
+                    {
+                        Debug.LogError($"SpawnGltfScenes: Null reference in scene {i}: {ex.Message}\nStackTrace: {ex.StackTrace}");
+                        return;
+                    }
+                    catch (System.Exception ex)
+                    {
+                        Debug.LogError($"SpawnGltfScenes: Error instantiating scene {i}: {ex.Message}\nStackTrace: {ex.StackTrace}");
+                        return;
+                    }
+                    
+                    // Check again after async operation (Unity's == operator handles destroyed objects)
+                    if (parent == null || i >= parent.childCount) 
+                    {
+                        Debug.LogWarning($"SpawnGltfScenes: parent or children destroyed after scene {i} instantiation");
+                        return;
+                    }
+
                     var scene = parent.GetChild(i).transform;
-                    if (scene == null) continue;
+                    if (scene == null || scene.gameObject == null) 
+                    {
+                        Debug.LogWarning($"SpawnGltfScenes: scene {i} is null or destroyed, skipping");
+                        continue;
+                    }
 
                     //set unitylayer for all gameon=bjects in scene to unityLayer of container
-                    foreach (var child in scene.GetComponentsInChildren<Transform>(true)) //getting the Transform components ensures the layer of each recursive child is set 
+                    try 
                     {
-                        child.gameObject.layer = parent.gameObject.layer;
+                        foreach (var child in scene.GetComponentsInChildren<Transform>(true)) //getting the Transform components ensures the layer of each recursive child is set 
+                        {
+                            if (child != null && child.gameObject != null)
+                            {
+                                child.gameObject.layer = parent.gameObject.layer;
+                            }
+                        }
                     }
-                    PositionGameObject(scene, rtcCenter, tile);
+                    catch (System.Exception ex)
+                    {
+                        Debug.LogWarning($"SpawnGltfScenes: Error setting layers for scene {i}: {ex.Message}");
+                    }
+                    // Revalidate tile and content before positioning (they could become null during async operations)
+                    Content currentContent = parent.GetComponent<Content>();
+                    Tile currentTile = currentContent?.ParentTile;
+                    
+                    if (currentTile != null && currentTile.content != null)
+                    {
+                        PositionGameObject(scene, rtcCenter, currentTile);
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"SpawnGltfScenes: tile or tile.content became null during scene {i} processing, skipping positioning");
+                    }
                 }
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"SpawnGltfScenes: Unexpected error during scene processing: {ex.Message}\nStackTrace: {ex.StackTrace}");
             }
         }
         void PositionGameObject(Transform scene, double[] rtcCenter, Tile tile)
         {
+            if (scene == null || tile == null)
+            {
+                Debug.LogWarning("PositionGameObject: scene or tile is null");
+                return;
+            }
+
+            // Additional null check for tile.content
+            if (tile.content == null)
+            {
+                Debug.LogWarning("PositionGameObject: tile.content is null");
+                return;
+            }
+
             //get the transformationMAtrix from the gameObject created bij GltFast
             Matrix4x4 BasisMatrix = Matrix4x4.TRS(scene.position, scene.rotation, scene.localScale);
             TileTransform basistransform = new TileTransform()
@@ -474,6 +575,37 @@ namespace Netherlands3D.Tiles3D
             foreach (var renderer in parentTransform.GetComponentsInChildren<Renderer>())
             {
                 renderer.material = overrideMaterial;
+            }
+        }
+
+        /// <summary>
+        /// Dispose only NativeArrays to prevent memory leaks while keeping GltfImport alive
+        /// </summary>
+        public void DisposeNativeArrays()
+        {
+            if (glbBufferNative.IsCreated)
+            {
+                glbBufferNative.Dispose();
+            }
+            
+            if (destination.IsCreated)
+            {
+                destination.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Dispose NativeArrays AND GltfImport - use only when completely done with content
+        /// </summary>
+        public void Dispose()
+        {
+            DisposeNativeArrays();
+            
+            // Also dispose the GltfImport if it exists
+            if (gltfImport != null)
+            {
+                gltfImport.Dispose();
+                gltfImport = null;
             }
         }
     }

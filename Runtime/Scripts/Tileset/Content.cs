@@ -30,8 +30,8 @@ namespace Netherlands3D.Tiles3D
         public UnityEvent<Content> onTileLoadCompleted = new();
 
         private UnityEngine.Material overrideMaterial;
+        private GLTFast.GltfImport gltfImport; // Reference to dispose later
 
-        private GltfImport gltf;
         Dictionary<string, string> headers = null;
         public enum ContentLoadState
         {
@@ -124,6 +124,10 @@ namespace Netherlands3D.Tiles3D
                 FinishedLoading(false);
                 return;
             }
+            
+            // Set state to PARSING to prevent dispose during async loading
+            State = ContentLoadState.PARSING;
+            
             TIleContentLoader.LoadContent(
                 data,
                 uri,
@@ -136,6 +140,14 @@ namespace Netherlands3D.Tiles3D
                 false,
                 headers
                 );
+        }
+
+        /// <summary>
+        /// Register GltfImport for later disposal
+        /// </summary>
+        public void RegisterGltfImport(GLTFast.GltfImport gltfImport)
+        {
+            this.gltfImport = gltfImport;
         }
 
         /// <summary>
@@ -178,9 +190,17 @@ namespace Netherlands3D.Tiles3D
            
             State = ContentLoadState.DOWNLOADED;
 
-            if (gltf != null)
+            // Dispose GltfImport to free native memory
+            if (gltfImport != null)
             {
-                gltf.Dispose();     
+                gltfImport.Dispose();
+                gltfImport = null;
+            }
+
+            // Check if GameObject is still valid before proceeding with component cleanup
+            if (this == null || gameObject == null)
+            {
+                return;
             }
 
             if (overrideMaterial == null)
@@ -208,7 +228,21 @@ namespace Netherlands3D.Tiles3D
                 }
             }
 
-            Destroy(this.gameObject);            
+            // Also clean up colliders that might reference meshes
+            if (this != null && gameObject != null)
+            {
+                Collider[] colliders = this.gameObject.GetComponentsInChildren<Collider>();
+                foreach (var collider in colliders)
+                {
+                    if (collider is MeshCollider meshCollider && meshCollider.sharedMesh != null)
+                    {
+                        // Clear mesh reference before destroying
+                        meshCollider.sharedMesh = null;
+                    }
+                }
+
+                Destroy(this.gameObject);
+            }            
         }
 
         //todo we need to come up with a way to get all used texture slot property names from the gltf package

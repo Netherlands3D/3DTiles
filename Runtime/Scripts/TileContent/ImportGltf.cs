@@ -72,33 +72,73 @@ namespace Netherlands3D.Tiles3D
                 gltfImport = gltf,
                 //rtcCenter = rtcCenter,
             };
-            await parsedGltf.SpawnGltfScenes(containerTransform);
 
-            containerTransform.gameObject.name = sourcePath;
-
-            if (parseAssetMetaData)
+            try
             {
+                // Check if containerTransform is still valid before proceeding
+                if (containerTransform == null)
+                {
+                    Debug.LogWarning("Container transform is null, canceling GLTF processing");
+                    succesCallback.Invoke(false);
+                    return;
+                }
+
+                await parsedGltf.SpawnGltfScenes(containerTransform);
+
+                // Check again after async operation in case transform was destroyed
+                if (containerTransform == null)
+                {
+                    Debug.LogWarning("Container transform destroyed during GLTF processing");
+                    succesCallback.Invoke(false);
+                    return;
+                }
+
+                containerTransform.gameObject.name = sourcePath;
+
+                // Register GltfImport with Content for later disposal
                 Content content = containerTransform.GetComponent<Content>();
                 if (content != null)
                 {
-                    // parsedGltf.ParseAssetMetaData(content);
+                    content.RegisterGltfImport(gltf);
                 }
 
-            }
+                if (parseAssetMetaData)
+                {
+                    if (content != null)
+                    {
+                        // parsedGltf.ParseAssetMetaData(content);
+                    }
 
-            //Check if mesh features addon is used to define subobjects
+                }
+
+                //Check if mesh features addon is used to define subobjects
 #if SUBOBJECT
-            if (parseSubObjects)
-            {
-                // parsedGltf.ParseSubObjects(containerTransform);
-            }
+                if (parseSubObjects)
+                {
+                    // parsedGltf.ParseSubObjects(containerTransform);
+                }
 #endif
 
-            if (overrideMaterial != null)
-            {
-                parsedGltf.OverrideAllMaterials(overrideMaterial);
+                if (overrideMaterial != null)
+                {
+                    parsedGltf.OverrideAllMaterials(overrideMaterial);
+                }
+
+                succesCallback.Invoke(true);
             }
-            succesCallback.Invoke(true);
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"Error processing GLTF content: {ex.Message}");
+                succesCallback.Invoke(false);
+            }
+            finally
+            {
+                // Dispose NativeArrays but keep GltfImport alive for Unity to use
+                if (parsedGltf != null)
+                {
+                    parsedGltf.DisposeNativeArrays();
+                }
+            }
         }
         static void PositionGameObject(Transform scene, double[] rtcCenter, TileTransform tileTransform)
         {

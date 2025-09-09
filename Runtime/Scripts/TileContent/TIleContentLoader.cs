@@ -61,6 +61,7 @@ namespace Netherlands3D.Tiles3D
             if (webRequest.result != UnityWebRequest.Result.Success)
             {
                 Debug.LogWarning(url + " -> " + webRequest.error);
+                webRequest.Dispose(); // Clean up on error
                 Callback.Invoke(null,url);
                 yield break;
             }
@@ -71,6 +72,9 @@ namespace Netherlands3D.Tiles3D
                 Debug.Log("downloaded data");
     
             Callback.Invoke(contentBytes, url);
+            
+            // Always dispose webRequest to prevent memory leaks
+            webRequest.Dispose();
         }
 
         public static async Task LoadContent(byte[] contentBytes,string sourceUri, Transform containerTransform, Tile tile, Action<bool> succesCallback, bool parseAssetMetaData = false, bool parseSubObjects = false, UnityEngine.Material overrideMaterial = null, bool bypassCertificateValidation = false, Dictionary<string, string> customHeaders = null)

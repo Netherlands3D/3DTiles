@@ -20,12 +20,15 @@ namespace Netherlands3D.Tiles3D
             if (www.result != UnityWebRequest.Result.Success)
             {
                 Debug.Log($"Could not load tileset from url:{url} Error:{www.error}");
+                returnTo.Invoke(null);
             }
             else
             {
                 returnTo.Invoke(www.downloadHandler);
             }
-            returnTo.Invoke(null);
+            
+            // Always dispose UnityWebRequest to prevent memory leaks
+            www.Dispose();
         }
     }
 }

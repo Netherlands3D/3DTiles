@@ -86,6 +86,9 @@ namespace Netherlands3D.Tiles3D
                 }
             }
 
+            // Always dispose UnityWebRequest to prevent memory leaks
+            www.Dispose();
+            
             isbusy = false;
             if (debugLog)
                 Debug.Log("subtree loaded");

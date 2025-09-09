@@ -51,6 +51,13 @@ namespace Netherlands3D.Tiles3D
         public string contentUri = "";
         public Content content; //Gltf content
 
+        public static Action<Tile> OnTileCreated;
+
+        public Tile()
+        {
+            OnTileCreated?.Invoke(this);
+        }
+
         public int CountLoadingChildren()
         {
             int result = 0;

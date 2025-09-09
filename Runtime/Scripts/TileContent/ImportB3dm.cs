@@ -60,36 +60,73 @@ namespace Netherlands3D.Tiles3D
                 glbBuffer = b3dm.GlbData //Store the glb buffer for access in subobjects
 #endif
             };
-            await parsedGltf.SpawnGltfScenes(containerTransform);
 
-            containerTransform.gameObject.name = sourcePath;
-
-            if (parseAssetMetaData)
+            try
             {
-                Content content = containerTransform.GetComponent<Content>();
-                if (content!=null)
+                // Check if containerTransform is still valid before proceeding
+                if (containerTransform == null)
                 {
-                   // parsedGltf.ParseAssetMetaData(content);
+                    Debug.LogWarning("Container transform is null, canceling B3DM processing");
+                    succesCallback.Invoke(false);
+                    return;
                 }
-                
-            }
 
-            //Check if mesh features addon is used to define subobjects
+                await parsedGltf.SpawnGltfScenes(containerTransform);
+
+                // Check again after async operation in case transform was destroyed
+                if (containerTransform == null)
+                {
+                    Debug.LogWarning("Container transform destroyed during B3DM processing");
+                    succesCallback.Invoke(false);
+                    return;
+                }
+
+                containerTransform.gameObject.name = sourcePath;
+
+                // Register GltfImport with Content for later disposal
+                Content content = containerTransform.GetComponent<Content>();
+                if (content != null)
+                {
+                    content.RegisterGltfImport(gltf);
+                }
+
+                if (parseAssetMetaData)
+                {
+                    if (content!=null)
+                    {
+                       // parsedGltf.ParseAssetMetaData(content);
+                    }
+                    
+                }
+
+                //Check if mesh features addon is used to define subobjects
 #if SUBOBJECT
-            if (parseSubObjects)
-            {
-               // parsedGltf.ParseSubObjects(containerTransform);
-            }
+                if (parseSubObjects)
+                {
+                   // parsedGltf.ParseSubObjects(containerTransform);
+                }
 #endif
 
-            if (overrideMaterial != null)
-            {
-                parsedGltf.OverrideAllMaterials(overrideMaterial);
+                if (overrideMaterial != null)
+                {
+                    parsedGltf.OverrideAllMaterials(overrideMaterial);
+                }
+
+                succesCallback.Invoke(true);
             }
-
-
-
-            succesCallback.Invoke(true);
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"Error processing B3DM content: {ex.Message}");
+                succesCallback.Invoke(false);
+            }
+            finally
+            {
+                // Dispose NativeArrays but keep GltfImport alive for Unity to use
+                if (parsedGltf != null)
+                {
+                    parsedGltf.DisposeNativeArrays();
+                }
+            }
         }
         
         private static double[] GetRTCCenterFromB3dm(B3dm b3dm)
