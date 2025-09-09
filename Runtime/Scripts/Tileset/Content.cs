@@ -105,6 +105,13 @@ namespace Netherlands3D.Tiles3D
             if (State == ContentLoadState.DOWNLOADING || State == ContentLoadState.DOWNLOADED)
                 return;
 
+            // Check if tile metadata is cached (for debug purposes only)
+            bool hasCachedMetadata = parentTile.LoadFromCache();
+            if (hasCachedMetadata)
+            {
+                Debug.Log($"[CACHE HIT] 📦 Using cached metadata for tile {parentTile.TileId}");
+            }
+
             State = ContentLoadState.DOWNLOADING;
             parentTile.isLoading = true;
             TIleContentLoader.debugLog = verbose;
@@ -154,8 +161,15 @@ namespace Netherlands3D.Tiles3D
         private void FinishedLoading(bool succes)
         {
             State = ContentLoadState.DOWNLOADED;
+            
+            // Store successfully downloaded tile metadata to cache
+            if (succes && parentTile != null)
+            {
+                parentTile.StoreToCache();
+                Debug.Log($"[CACHE STORE] 💾 Saved metadata for tile {parentTile.TileId}");
+            }
+            
             onDoneDownloading.Invoke(parentTile);
-
         }
         //       
 

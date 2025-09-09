@@ -2,6 +2,7 @@ using Netherlands3D.Coordinates;
 //using PlasticPipe.PlasticProtocol.Messages;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 namespace Netherlands3D.Tiles3D
@@ -9,6 +10,133 @@ namespace Netherlands3D.Tiles3D
     [System.Serializable]
     public class Tile : IDisposable
     {
+        // Disk caching support
+        private string _tileId;
+        public string TileId 
+        { 
+            get => _tileId ??= GenerateUniqueTileId();
+            set => _tileId = value;
+        }
+        
+        private bool _isLoadedFromCache = false;
+        public bool IsLoadedFromCache => _isLoadedFromCache;
+        
+        public static int TotalCacheHits { get; private set; } = 0;
+        public static int TotalCacheStores { get; private set; } = 0;
+        
+        public static void LogCacheStats()
+        {
+            Debug.Log($"📊 [CACHE STATS] Hits: {TotalCacheHits}, Stores: {TotalCacheStores}");
+        }
+        
+        public static void LogCacheDirectory()
+        {
+            try
+            {
+                string persistentPath = Application.persistentDataPath;
+                string cacheDir = System.IO.Path.Combine(persistentPath, "TileCache");
+                
+                Debug.Log($"🗂️  [PERSISTENT PATH] {persistentPath}");
+                Debug.Log($"📁 [CACHE PATH] {cacheDir}");
+                
+                if (System.IO.Directory.Exists(cacheDir))
+                {
+                    var files = System.IO.Directory.GetFiles(cacheDir, "*.cache");
+                    Debug.Log($"� [CACHE FILES] {files.Length} cached tiles found");
+                    
+                    // Show first few filenames as examples
+                    for (int i = 0; i < Math.Min(5, files.Length); i++)
+                    {
+                        string fileName = System.IO.Path.GetFileName(files[i]);
+                        var fileInfo = new System.IO.FileInfo(files[i]);
+                        Debug.Log($"   • {fileName} ({fileInfo.Length} bytes)");
+                    }
+                    if (files.Length > 5)
+                    {
+                        Debug.Log($"   ... and {files.Length - 5} more files");
+                    }
+                }
+                else
+                {
+                    Debug.Log($"� [CACHE DIR] Directory does not exist yet");
+                }
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"❌ [CACHE DIR] Error checking cache directory: {e.Message}");
+            }
+        }
+        
+        public static void OpenCacheDirectoryInFinder()
+        {
+            try
+            {
+                string persistentPath = Application.persistentDataPath;
+                string cacheDir = System.IO.Path.Combine(persistentPath, "TileCache");
+                
+                // Create directory if it doesn't exist
+                if (!System.IO.Directory.Exists(cacheDir))
+                {
+                    System.IO.Directory.CreateDirectory(cacheDir);
+                }
+                
+                // Open in Finder (macOS)
+                System.Diagnostics.Process.Start("open", $"\"{persistentPath}\"");
+                Debug.Log($"🍎 [FINDER] Opened cache directory in Finder: {persistentPath}");
+                Debug.Log($"💡 [TIP] Look for the 'TileCache' folder inside this directory");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"❌ [FINDER] Could not open cache directory: {e.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Generate unique TileId that works for Google Photorealistic tiles and other tile formats
+        /// </summary>
+        private string GenerateUniqueTileId()
+        {
+            // Priority 1: Use contentUri if available (works for Google Photorealistic)
+            if (!string.IsNullOrEmpty(contentUri))
+            {
+                // Clean up URI to make it filesystem-safe
+                return "uri_" + contentUri.Replace("/", "_")
+                                           .Replace("\\", "_")
+                                           .Replace(":", "_")
+                                           .Replace("?", "_")
+                                           .Replace("&", "_")
+                                           .Replace("=", "_")
+                                           .Replace(".", "_");
+            }
+            
+            // Priority 2: Use level/X/Y for implicit tiling (Cesium style)
+            if (level >= 0 && X >= 0 && Y >= 0)
+            {
+                return $"lxy_{level}_{X}_{Y}";
+            }
+            
+            // Priority 3: Use bounding volume center + geometric error
+            if (boundingVolume?.values != null && boundingVolume.values.Length >= 3 && geometricError > 0)
+            {
+                // Use center coordinates and geometric error as unique identifier
+                double centerX = boundingVolume.values[0];
+                double centerY = boundingVolume.values[1]; 
+                double centerZ = boundingVolume.values[2];
+                
+                return $"bbox_{centerX:F6}_{centerY:F6}_{centerZ:F6}_{geometricError:F2}"
+                    .Replace(".", "_").Replace("-", "n"); // Make filesystem-safe
+            }
+            
+            // Priority 4: Use parent relationship + index
+            if (parent != null)
+            {
+                int siblingIndex = parent.children?.IndexOf(this) ?? 0;
+                return $"{parent.TileId}_child_{siblingIndex}";
+            }
+            
+            // Last resort: Use object hash + timestamp
+            return $"tile_{GetHashCode():X8}_{DateTime.Now.Ticks:X8}";
+        }
 
         public bool disposed;
 
@@ -529,6 +657,9 @@ namespace Netherlands3D.Tiles3D
         {
             disposed = true;
 
+            // Try to cache tile data before disposal (WebGL safe)
+            StoreToCache(); // Synchronous version for WebGL
+
             foreach (var child in children)
             {
                 child.parent = null;
@@ -545,10 +676,95 @@ namespace Netherlands3D.Tiles3D
                 content = null;
             }
         }
+        
+        /// <summary>
+        /// Store tile data to disk cache (WebGL-safe synchronous operation)
+        /// </summary>
+        public void StoreToCache()
+        {
+            if (string.IsNullOrEmpty(contentUri)) return;
+            
+            try
+            {
+                // Use persistentDataPath which maps to IndexedDB in WebGL
+                string cacheDir = System.IO.Path.Combine(Application.persistentDataPath, "TileCache");
+                if (!System.IO.Directory.Exists(cacheDir))
+                {
+                    System.IO.Directory.CreateDirectory(cacheDir);
+                }
+                
+                string cacheFile = System.IO.Path.Combine(cacheDir, $"{TileId}.cache");
+                
+                // Store tile metadata as JSON
+                var tileInfo = new TileCacheInfo
+                {
+                    geometricError = this.geometricError,
+                    contentUri = this.contentUri
+                };
+                
+                string json = JsonUtility.ToJson(tileInfo);
+                System.IO.File.WriteAllText(cacheFile, json);
+                
+                TotalCacheStores++;
+                // Debug.Log($"💾 [CACHE] Stored metadata for tile {TileId}");
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"Failed to store tile {TileId} to file cache: {e.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Try to load tile data from file cache (WebGL -> IndexedDB)
+        /// </summary>
+        public bool LoadFromCache()
+        {
+            try
+            {
+                string cacheDir = System.IO.Path.Combine(Application.persistentDataPath, "TileCache");
+                string cacheFile = System.IO.Path.Combine(cacheDir, $"{TileId}.cache");
+                
+                if (System.IO.File.Exists(cacheFile))
+                {
+                    string json = System.IO.File.ReadAllText(cacheFile);
+                    var tileInfo = JsonUtility.FromJson<TileCacheInfo>(json);
+                    
+                    if (tileInfo != null)
+                    {
+                        this.geometricError = tileInfo.geometricError;
+                        this.contentUri = tileInfo.contentUri;
+                           
+                        _isLoadedFromCache = true;
+                        TotalCacheHits++;
+                        // Debug.Log($"✅ [CACHE] Loaded metadata for tile {TileId} from file cache");
+                        return true;
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"Failed to load tile {TileId} from file cache: {e.Message}");
+            }
+            
+            return false;
+        }
 
         ~Tile()
         {
             Debug.Log($"tile finalized parentisnull:{parent == null} childrencount:{children.Count}");
+        }
+        
+
+        
+        /// <summary>
+        /// Serializable tile cache information
+        /// </summary>
+        [System.Serializable]
+        public class TileCacheInfo
+        {
+            public double geometricError;
+            public string contentUri;
+            public long cachedTime;
         }
     }
 }
