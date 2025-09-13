@@ -37,7 +37,22 @@ namespace Netherlands3D.Tiles3D
         public UnityEvent<Content> onTileLoadCompleted = new();
 
         private UnityEngine.Material overrideMaterial;
-        private GLTFast.GltfImport gltfImport; // Reference to dispose later
+        
+        // Lazy-initialized GltfImport with consistent configuration
+        private GLTFast.GltfImport _gltfImportObject;
+        public GLTFast.GltfImport GltfImportObject
+        {
+            get
+            {
+                if (_gltfImportObject == null)
+                {
+                    var consoleLogger = new GLTFast.Logging.ConsoleLogger();
+                    var materialGenerator = new NL3DMaterialGenerator();
+                    _gltfImportObject = new GLTFast.GltfImport(null, null, materialGenerator, consoleLogger);
+                }
+                return _gltfImportObject;
+            }
+        }
         
         // Cancellation token for async operations
         private System.Threading.CancellationTokenSource cancellationTokenSource;
@@ -161,14 +176,6 @@ namespace Netherlands3D.Tiles3D
         }
 
         /// <summary>
-        /// Register GltfImport for later disposal
-        /// </summary>
-        public void RegisterGltfImport(GLTFast.GltfImport gltfImport)
-        {
-            this.gltfImport = gltfImport;
-        }
-
-        /// <summary>
         /// After parsing gltf content spawn gltf scenes
         /// </summary>
         /// 
@@ -177,14 +184,6 @@ namespace Netherlands3D.Tiles3D
             State = ContentLoadState.DOWNLOADED;
             onDoneDownloading.Invoke();
             onTileLoadCompleted.Invoke(this);
-        }
-
-        private void OverrideAllMaterials(Transform parent)
-        {
-            foreach (var renderer in parent.GetComponentsInChildren<Renderer>())
-            {
-                renderer.material = overrideMaterial;
-            }
         }
 
         /// <summary>
@@ -217,11 +216,11 @@ namespace Netherlands3D.Tiles3D
            
             State = ContentLoadState.NOTLOADING;
 
-            // Dispose GltfImport to free native memory
-            if (gltfImport != null)
+            // Dispose GltfImport instance to free native memory
+            if (_gltfImportObject != null)
             {
-                gltfImport.Dispose();
-                gltfImport = null;
+                _gltfImportObject.Dispose();
+                _gltfImportObject = null;
             }
 
             // Check if GameObject is still valid before proceeding with component cleanup
@@ -410,9 +409,6 @@ namespace Netherlands3D.Tiles3D
                 rtcCenter = GetRTCCenterFromGlb(b3dm.GlbData); // Reuse existing method
             }
             
-            var materialGenerator = new NL3DMaterialGenerator();
-            GltfImport gltf = new GltfImport(null, null, materialGenerator);
-            
             var success = true;
             Uri uri = null;
             if (sourceUri != "")
@@ -420,7 +416,8 @@ namespace Netherlands3D.Tiles3D
                 uri = new Uri(sourceUri);
             }
     
-            success = await gltf.Load(b3dm.GlbData, uri, GetImportSettings()); // Use modern Load method instead of obsolete LoadGltfBinary
+            // Use shared GltfImportObject instance directly
+            success = await GltfImportObject.Load(b3dm.GlbData, uri, GetImportSettings()); // Use modern Load method instead of obsolete LoadGltfBinary
 
             // Check again after async operation
             if (this == null || gameObject == null || transform == null)
@@ -435,15 +432,6 @@ namespace Netherlands3D.Tiles3D
                 return false;
             }
 
-            var parsedGltf = new ParsedGltf()
-            {
-                gltfImport = gltf,
-                rtcCenter = rtcCenter,
-#if SUBOBJECT
-                glbBuffer = b3dm.GlbData //Store the glb buffer for access in subobjects
-#endif
-            };
-
             try
             {
                 // Check if component is still valid before proceeding
@@ -453,7 +441,12 @@ namespace Netherlands3D.Tiles3D
                     return false;
                 }
 
-                await parsedGltf.SpawnGltfScenes(transform);
+                // Spawn scenes directly from Content
+                await SpawnGltfScenesAsync(transform, GltfImportObject, rtcCenter, cancellationTokenSource?.Token ?? default
+#if SUBOBJECT
+                    , b3dm.GlbData
+#endif
+                );
 
                 // Check again after async operation in case component was destroyed
                 if (this == null || gameObject == null || transform == null)
@@ -464,12 +457,9 @@ namespace Netherlands3D.Tiles3D
 
                 gameObject.name = sourceUri;
 
-                // Register GltfImport for later disposal
-                RegisterGltfImport(gltf);
-
                 if (overrideMaterial != null)
                 {
-                    parsedGltf.OverrideAllMaterials(overrideMaterial);
+                    OverrideAllMaterials(overrideMaterial);
                 }
 
                 // Final validation before success
@@ -507,11 +497,6 @@ namespace Netherlands3D.Tiles3D
                 return false;
             }
 
-            var consoleLogger = new GLTFast.Logging.ConsoleLogger();
-            
-            var materialGenerator = new NL3DMaterialGenerator();
-            GltfImport gltf = new GltfImport(null, null, materialGenerator, consoleLogger);
-            
             var success = true;
             Uri uri = null;
             if (sourceUri != "")
@@ -520,7 +505,8 @@ namespace Netherlands3D.Tiles3D
             }
             RemoveCesiumRtcFromRequieredExtentions(ref contentBytes);
     
-            success = await gltf.Load(contentBytes, uri, GetImportSettings());
+            // Use shared GltfImportObject instance directly
+            success = await GltfImportObject.Load(contentBytes, uri, GetImportSettings());
 
             // Check again after async operation
             if (this == null || gameObject == null || transform == null)
@@ -543,12 +529,6 @@ namespace Netherlands3D.Tiles3D
             }
 
             double[] rtcCenter = GetRTCCenterFromGlb(contentBytes);
-            var parsedGltf = new ParsedGltf()
-            {
-                gltfImport = gltf,
-                rtcCenter = rtcCenter,
-            };
-
             try
             {
                 // Check if this component and GameObject are still valid before proceeding
@@ -559,7 +539,7 @@ namespace Netherlands3D.Tiles3D
                 }
 
                 // Additional validation before spawning scenes
-                if (parsedGltf.gltfImport == null)
+                if (GltfImportObject == null)
                 {
                     Debug.LogError("GltfImport is null, cannot spawn scenes");
                     return false;
@@ -571,7 +551,7 @@ namespace Netherlands3D.Tiles3D
                 {
                     try
                     {
-                        await parsedGltf.SpawnGltfScenes(transform);
+                        await SpawnGltfScenesAsync(transform, GltfImportObject, rtcCenter, cancellationTokenSource?.Token ?? default);
                     }
                     catch (System.OperationCanceledException)
                     {
@@ -589,12 +569,9 @@ namespace Netherlands3D.Tiles3D
 
                 gameObject.name = sourceUri;
 
-                // Register GltfImport for later disposal
-                RegisterGltfImport(gltf);
-
                 if (overrideMaterial != null)
                 {
-                    parsedGltf.OverrideAllMaterials(overrideMaterial);
+                    OverrideAllMaterials(overrideMaterial);
                 }
 
                 // Final validation before success
@@ -632,9 +609,6 @@ namespace Netherlands3D.Tiles3D
                 return false;
             }
 
-            var materialGenerator = new NL3DMaterialGenerator();
-            GltfImport gltf = new GltfImport(null, null, materialGenerator);
-            
             var success = true;
             Uri uri = null;
             if (sourceUri != "")
@@ -642,7 +616,8 @@ namespace Netherlands3D.Tiles3D
                 uri = new Uri(sourceUri);
             }
     
-            success = await gltf.Load(uri);
+            // Use shared GltfImportObject instance directly
+            success = await GltfImportObject.Load(uri);
 
             // Check again after async operation
             if (this == null || gameObject == null || transform == null)
@@ -657,11 +632,6 @@ namespace Netherlands3D.Tiles3D
                 return false;
             }
 
-            var parsedGltf = new ParsedGltf()
-            {
-                gltfImport = gltf,
-            };
-
             try
             {
                 // Check if component is still valid before proceeding
@@ -671,7 +641,7 @@ namespace Netherlands3D.Tiles3D
                     return false;
                 }
 
-                await parsedGltf.SpawnGltfScenes(transform);
+                await SpawnGltfScenesAsync(transform, GltfImportObject, null, cancellationTokenSource?.Token ?? default);
 
                 // Check again after async operation in case component was destroyed
                 if (this == null || gameObject == null || transform == null)
@@ -682,12 +652,9 @@ namespace Netherlands3D.Tiles3D
 
                 gameObject.name = sourceUri;
 
-                // Register GltfImport for later disposal
-                RegisterGltfImport(gltf);
-
                 if (overrideMaterial != null)
                 {
-                    parsedGltf.OverrideAllMaterials(overrideMaterial);
+                    OverrideAllMaterials(overrideMaterial);
                 }
 
                 // Final validation before success
@@ -936,6 +903,141 @@ namespace Netherlands3D.Tiles3D
             {
                 b3dm.GlbData[jsonstart + j] = 0x20;
             }
+        }
+
+        #endregion
+
+        #region Inlined Parsed GLTF helpers
+
+        private async Task SpawnGltfScenesAsync(Transform parent, GLTFast.GltfImport gltfImport, double[] rtcCenter, System.Threading.CancellationToken cancellationToken = default
+#if SUBOBJECT
+            , byte[] glbBuffer = null
+#endif
+        )
+        {
+            if (parent == null)
+            {
+                Debug.LogError("SpawnGltfScenesAsync: parent Transform is null");
+                return;
+            }
+            if (gltfImport == null)
+            {
+                Debug.LogError("SpawnGltfScenesAsync: gltfImport is null");
+                return;
+            }
+
+            try
+            {
+                var scenes = gltfImport.SceneCount;
+                for (int i = 0; i < scenes; i++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    // Instantiate scene i
+                    await SafeInstantiateSceneAsync(gltfImport, parent, i, cancellationToken);
+
+                    // Protect against destroyed parent
+                    if (parent == null)
+                    {
+                        Debug.LogWarning($"SpawnGltfScenesAsync: parent destroyed during scene {i} instantiation");
+                        return;
+                    }
+
+                    // Set layers
+                    var scene = parent.GetChild(i).transform;
+                    if (scene != null)
+                    {
+                        foreach (var child in scene.GetComponentsInChildren<Transform>(true))
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            if (child != null && child.gameObject != null)
+                            {
+                                child.gameObject.layer = parent.gameObject.layer;
+                            }
+                        }
+
+                        // Position scene
+                        if (ParentTile != null)
+                        {
+                            PositionGameObject(scene, rtcCenter, ParentTile);
+                        }
+                    }
+                }
+
+#if SUBOBJECT
+                // Optional: parse metadata/subobjects here if needed in the future using glbBuffer
+#endif
+            }
+            catch (System.OperationCanceledException)
+            {
+                Debug.Log("SpawnGltfScenesAsync: Operation was cancelled");
+            }
+        }
+
+        private async Task SafeInstantiateSceneAsync(GLTFast.GltfImport gltfImport, Transform parent, int sceneIndex, System.Threading.CancellationToken cancellationToken)
+        {
+            if (gltfImport == null) throw new System.ObjectDisposedException("gltfImport");
+            if (parent == null) throw new UnityEngine.MissingReferenceException("parent Transform is null or destroyed");
+
+            cancellationToken.ThrowIfCancellationRequested();
+            await gltfImport.InstantiateSceneAsync(parent, sceneIndex);
+        }
+
+        private void OverrideAllMaterials(UnityEngine.Material material)
+        {
+            if (this == null || gameObject == null) return;
+            foreach (var renderer in gameObject.GetComponentsInChildren<Renderer>())
+            {
+                renderer.material = material;
+            }
+        }
+
+        private void PositionGameObject(Transform scene, double[] rtcCenter, Tile tile)
+        {
+            if (scene == null || tile == null || tile.content == null) return;
+
+            Matrix4x4 BasisMatrix = Matrix4x4.TRS(scene.position, scene.rotation, scene.localScale);
+            TileTransform basistransform = new TileTransform()
+            {
+                m00 = BasisMatrix.m00, m01 = BasisMatrix.m01, m02 = BasisMatrix.m02, m03 = BasisMatrix.m03,
+                m10 = BasisMatrix.m10, m11 = BasisMatrix.m11, m12 = BasisMatrix.m12, m13 = BasisMatrix.m13,
+                m20 = BasisMatrix.m20, m21 = BasisMatrix.m21, m22 = BasisMatrix.m22, m23 = BasisMatrix.m23,
+                m30 = BasisMatrix.m30, m31 = BasisMatrix.m31, m32 = BasisMatrix.m32, m33 = BasisMatrix.m33,
+            };
+
+            TileTransform gltFastToGLTF = new TileTransform() { m00 = -1d, m11 = 1, m22 = 1, m33 = 1 };
+            TileTransform yUpToZUp = new TileTransform() { m00 = 1d, m12 = -1d, m21 = 1, m33 = 1d };
+
+            TileTransform geometryInECEF = yUpToZUp * gltFastToGLTF * basistransform;
+            TileTransform geometryInCRS = tile.tileTransform * geometryInECEF;
+
+            TileTransform ECEFToUnity = new TileTransform() { m01 = 1d, m12 = 1d, m20 = -1d, m33 = 1d };
+            TileTransform geometryInUnity = ECEFToUnity * geometryInCRS;
+
+            Matrix4x4 final = new Matrix4x4()
+            {
+                m00 = (float)geometryInUnity.m00, m01 = (float)geometryInUnity.m01, m02 = (float)geometryInUnity.m02, m03 = 0f,
+                m10 = (float)geometryInUnity.m10, m11 = (float)geometryInUnity.m11, m12 = (float)geometryInUnity.m12, m13 = 0f,
+                m20 = (float)geometryInUnity.m20, m21 = (float)geometryInUnity.m21, m22 = (float)geometryInUnity.m22, m23 = 0f,
+                m30 = 0f, m31 = 0f, m32 = 0f, m33 = 1f
+            };
+
+            final.Decompose(out Vector3 translation, out Quaternion rotation, out Vector3 scale);
+
+            Coordinate sceneCoordinate = new Coordinate(tile.content.contentcoordinateSystem, geometryInCRS.m03, geometryInCRS.m13, geometryInCRS.m23);
+            if (rtcCenter != null)
+            {
+                sceneCoordinate = new Coordinate(tile.content.contentcoordinateSystem, rtcCenter[0], rtcCenter[1], rtcCenter[2]) + sceneCoordinate;
+            }
+
+            rotation = Quaternion.AngleAxis(90, Vector3.up) * rotation;
+            tile.content.contentCoordinate = sceneCoordinate;
+
+            scene.localScale = scale;
+            var scenepos = scene.gameObject.AddComponent<ScenePosition>();
+            scenepos.contentposition = sceneCoordinate;
+            scene.position = sceneCoordinate.ToUnity();
+            scene.rotation = sceneCoordinate.RotationToLocalGravityUp() * rotation;
         }
 
         #endregion

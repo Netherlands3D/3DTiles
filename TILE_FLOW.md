@@ -6,9 +6,8 @@ This document describes the complete flow of loading and disposing 3D tiles in t
 ## Architecture Components
 
 ### Core Classes
-- **`Content.cs`** - Main content loader, disposal manager, and content downloading/processing
+- **`Content.cs`** - Main content loader, disposal manager, content downloading/processing, and GLTF scene instantiation/positioning
 - **`Tile.cs`** - Tile metadata and hierarchy
-- **`ParsedGltf.cs`** - GLTF scene instantiation and processing
 - **`ImportB3dm.cs`** - B3DM content importer
 - **`ImportGlb.cs`** - GLB content importer
 - **`ImportGltf.cs`** - GLTF URI content importer
@@ -74,16 +73,15 @@ Content.ProcessDownloadedData()
 ### 6. GLTF Import and Scene Instantiation
 ```
 ImportGlb.Load() / ImportB3dm.LoadB3dm() / ImportGltf.Load()
-├── Create GltfImport instance
-├── gltf.Load() with CancellationToken
-├── Create ParsedGltf wrapper
-├── ParsedGltf.SpawnGltfScenes() with CancellationToken
-└── Register gltfImport with Content for disposal
+├── Create/Reuse `GltfImport` via `Content.GltfImportObject`
+├── `gltf.Load(...)` with CancellationToken
+├── `Content.SpawnGltfScenesAsync(...)` with CancellationToken
+└── `Content` manages `GltfImport` lifecycle and disposal
 ```
 
-### 7. Scene Spawning (`ParsedGltf.cs`)
+### 7. Scene Spawning (`Content.cs`)
 ```
-SpawnGltfScenes()
+SpawnGltfScenesAsync()
 ├── For each scene in GLTF:
 │   ├── Validate parent Transform exists
 │   ├── Check Content.State != NOTLOADING
