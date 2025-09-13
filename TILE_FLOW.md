@@ -6,10 +6,9 @@ This document describes the complete flow of loading and disposing 3D tiles in t
 ## Architecture Components
 
 ### Core Classes
-- **`Content.cs`** - Main content loader and disposal manager
+- **`Content.cs`** - Main content loader, disposal manager, and content downloading/processing
 - **`Tile.cs`** - Tile metadata and hierarchy
 - **`ParsedGltf.cs`** - GLTF scene instantiation and processing
-- **`TileContentLoader.cs`** - Content downloading, type detection, and routing
 - **`ImportB3dm.cs`** - B3DM content importer
 - **`ImportGlb.cs`** - GLB content importer
 - **`ImportGltf.cs`** - GLTF URI content importer
@@ -57,13 +56,13 @@ WebTilePrioritiser.LateUpdate()
 Content.Load()
 ├── State = DOWNLOADING
 ├── Create CancellationTokenSource
-├── Start Coroutine: TileContentLoader.DownloadContent()
+├── Start Coroutine: Content.DownloadContent()
 └── Callback: DownloadedData()
 ```
 
-### 5. Content Processing (`TileContentLoader.cs`)
+### 5. Content Processing (`Content.cs`)
 ```
-TileContentLoader.ProcessDownloadedData()
+Content.ProcessDownloadedData()
 ├── Detect content type (B3DM/GLB/GLTF)
 ├── Route to appropriate importer:
 │   ├── ImportB3dm.LoadB3dm()
@@ -254,7 +253,7 @@ Content.Dispose() continued...
 - ✅ Enhanced WebGL resource cleanup
 - ✅ Removed delayed disposal queue complexity
 - ✅ Removed legacy DisposeNativeArrays() calls (modern GLTFast handles automatically)
-- ✅ Maintained original 3-file architecture (TIleContentLoader + separate importers)
+- ✅ Maintained unified architecture (Content.cs handles all loading/processing)
 
 ### Previous Issues Resolved
 - ❌ Memory heap growth in WebGL builds

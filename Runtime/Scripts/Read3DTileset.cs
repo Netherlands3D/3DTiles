@@ -637,7 +637,7 @@ namespace Netherlands3D.Tiles3D
 
             if (tile.isLoading == false && tile.children.Count == 0 && tile.contentUri.Contains(".subtree"))
             {
-                UnityEngine.Debug.Log(tile.contentUri);
+                //UnityEngine.Debug.Log(tile.contentUri);
                 ReadSubtree subtreeReader = GetComponent<ReadSubtree>();
                 if (subtreeReader.isbusy)
                 {
