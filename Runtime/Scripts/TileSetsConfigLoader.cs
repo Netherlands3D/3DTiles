@@ -55,7 +55,7 @@ namespace Netherlands3D.Tiles3D
 
         private void AddTileSets()
         {
-            var tilePrioritiser = GetComponent<TilePrioritiser>(); 
+            var tilePrioritiser = GetComponent<WebTilePrioritiser>(); 
 
             foreach (var tileset in config.tilesets)
             {

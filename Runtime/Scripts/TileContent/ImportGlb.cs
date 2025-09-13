@@ -143,11 +143,8 @@ namespace Netherlands3D.Tiles3D
             }
             finally
             {
-                // Dispose NativeArrays but keep GltfImport alive for Unity to use
-                if (parsedGltf != null)
-                {
-                    parsedGltf.DisposeNativeArrays();
-                }
+                // Modern GLTFast automatically handles native array disposal
+                // No manual disposal needed anymore
             }
         }
        

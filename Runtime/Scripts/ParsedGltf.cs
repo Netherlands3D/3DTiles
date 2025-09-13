@@ -6,8 +6,6 @@ using System;
 using System.Text.RegularExpressions;
 using System.Text;
 using Newtonsoft.Json;
-using Meshoptimizer;
-using Unity.Collections;
 using Netherlands3D.Coordinates;
 using SimpleJSON;
 
@@ -26,11 +24,12 @@ namespace Netherlands3D.Tiles3D
         public double[] rtcCenter = null;
         public CoordinateSystem coordinatesystem;
 
-        private NativeArray<byte> glbBufferNative;
-        private NativeArray<byte> destination;
-        private NativeSlice<byte> source;
-
         public Dictionary<int, Color> uniqueColors = new Dictionary<int, Color>();
+        
+        // Reusable collections to prevent heap allocations during subobject parsing
+        private List<Vector2Int> reusableVertexFeatureIds = new List<Vector2Int>();
+        private List<string> reusableBagIdList = new List<string>();
+        private List<ObjectMappingItem> reusableObjectMappingItems = new List<ObjectMappingItem>();
 
         JSONNode gltfJsonRoot = null;
 
@@ -96,7 +95,7 @@ namespace Netherlands3D.Tiles3D
         }
 
 
-        public async Task SpawnGltfScenes(Transform parent)
+        public async Task SpawnGltfScenes(Transform parent, System.Threading.CancellationToken cancellationToken = default)
         {
             if (parent == null)
             {
@@ -136,10 +135,21 @@ namespace Netherlands3D.Tiles3D
                 //Spawn all scenes (InstantiateMainSceneAsync only possible if main scene was referenced in gltf)
                 for (int i = 0; i < scenes; i++)
                 {
+                    // Check cancellation token first
+                    cancellationToken.ThrowIfCancellationRequested();
+                    
                     // Check if parent still exists before each async call (Unity's == operator handles destroyed objects)
                     if (parent == null) 
                     {
                         Debug.LogWarning($"SpawnGltfScenes: parent Transform destroyed during scene {i} instantiation");
+                        return;
+                    }
+
+                    // Additional check for Content component state to see if disposal was requested
+                    Content currentParentContent = parent.GetComponent<Content>();
+                    if (currentParentContent == null || currentParentContent.State == Content.ContentLoadState.NOTLOADING)
+                    {
+                        Debug.LogWarning($"SpawnGltfScenes: Content disposed during scene {i} instantiation");
                         return;
                     }
 
@@ -152,7 +162,81 @@ namespace Netherlands3D.Tiles3D
                             return;
                         }
 
-                        await gltfImport.InstantiateSceneAsync(parent, i);
+                        // Check cancellation before async operation
+                        cancellationToken.ThrowIfCancellationRequested();
+                        
+                        // Additional validation right before GLTFast call
+                        if (parent == null || gltfImport == null)
+                        {
+                            Debug.LogWarning($"SpawnGltfScenes: parent or gltfImport became null before scene {i} instantiation");
+                            return;
+                        }
+                        
+                        // Check if gltfImport has been disposed (try to access a property)
+                        try
+                        {
+                            var sceneCount = gltfImport.SceneCount; // This will throw if disposed
+                            if (i >= sceneCount)
+                            {
+                                Debug.LogWarning($"SpawnGltfScenes: Scene index {i} out of range (SceneCount: {sceneCount})");
+                                return;
+                            }
+                        }
+                        catch (System.ObjectDisposedException)
+                        {
+                            Debug.LogWarning($"SpawnGltfScenes: gltfImport was disposed before scene {i} instantiation");
+                            return;
+                        }
+                        catch (System.Exception ex)
+                        {
+                            Debug.LogWarning($"SpawnGltfScenes: Error accessing gltfImport before scene {i}: {ex.Message}");
+                            return;
+                        }
+                        
+                        // Check Content state again right before instantiation
+                        Content preInstantiationContent = parent.GetComponent<Content>();
+                        if (preInstantiationContent == null || preInstantiationContent.State == Content.ContentLoadState.NOTLOADING)
+                        {
+                            Debug.LogWarning($"SpawnGltfScenes: Content disposed right before scene {i} instantiation");
+                            return;
+                        }
+
+                        try
+                        {
+                            // Wrap the InstantiateSceneAsync in a protected call
+                            await SafeInstantiateSceneAsync(gltfImport, parent, i, cancellationToken);
+                        }
+                        catch (System.ObjectDisposedException)
+                        {
+                            Debug.LogWarning($"SpawnGltfScenes: gltfImport was disposed during scene {i} instantiation");
+                            return;
+                        }
+                        catch (System.NullReferenceException ex)
+                        {
+                            Debug.LogWarning($"SpawnGltfScenes: Null reference during scene {i} instantiation - likely destroyed GameObject: {ex.Message}");
+                            return;
+                        }
+                        catch (UnityEngine.MissingReferenceException ex)
+                        {
+                            Debug.LogWarning($"SpawnGltfScenes: Missing reference during scene {i} instantiation - GameObject was destroyed: {ex.Message}");
+                            return;
+                        }
+                        
+                        // Check cancellation after async operation
+                        cancellationToken.ThrowIfCancellationRequested();
+                        
+                        // Check again if we're still valid after async operation
+                        Content postAsyncContent = parent?.GetComponent<Content>();
+                        if (postAsyncContent == null || postAsyncContent.State == Content.ContentLoadState.NOTLOADING)
+                        {
+                            Debug.LogWarning($"SpawnGltfScenes: Content disposed during scene {i} async instantiation");
+                            return;
+                        }
+                    }
+                    catch (System.OperationCanceledException)
+                    {
+                        Debug.Log($"SpawnGltfScenes: Scene {i} instantiation was cancelled (this is normal during disposal)");
+                        throw; // Re-throw to let calling code know it was cancelled
                     }
                     catch (System.NullReferenceException ex)
                     {
@@ -172,6 +256,9 @@ namespace Netherlands3D.Tiles3D
                         return;
                     }
 
+                    // Check cancellation before scene processing
+                    cancellationToken.ThrowIfCancellationRequested();
+
                     var scene = parent.GetChild(i).transform;
                     if (scene == null || scene.gameObject == null) 
                     {
@@ -184,16 +271,28 @@ namespace Netherlands3D.Tiles3D
                     {
                         foreach (var child in scene.GetComponentsInChildren<Transform>(true)) //getting the Transform components ensures the layer of each recursive child is set 
                         {
+                            // Check cancellation during child processing
+                            cancellationToken.ThrowIfCancellationRequested();
+                            
                             if (child != null && child.gameObject != null)
                             {
                                 child.gameObject.layer = parent.gameObject.layer;
                             }
                         }
                     }
+                    catch (System.OperationCanceledException)
+                    {
+                        Debug.Log($"SpawnGltfScenes: Layer setting was cancelled during scene {i} processing");
+                        throw; // Re-throw to let calling code know it was cancelled
+                    }
                     catch (System.Exception ex)
                     {
                         Debug.LogWarning($"SpawnGltfScenes: Error setting layers for scene {i}: {ex.Message}");
                     }
+                    
+                    // Check cancellation before positioning
+                    cancellationToken.ThrowIfCancellationRequested();
+                    
                     // Revalidate tile and content before positioning (they could become null during async operations)
                     Content currentContent = parent.GetComponent<Content>();
                     Tile currentTile = currentContent?.ParentTile;
@@ -207,6 +306,11 @@ namespace Netherlands3D.Tiles3D
                         Debug.LogWarning($"SpawnGltfScenes: tile or tile.content became null during scene {i} processing, skipping positioning");
                     }
                 }
+            }
+            catch (System.OperationCanceledException)
+            {
+                Debug.Log("SpawnGltfScenes: Operation was cancelled (this is normal during disposal)");
+                throw; // Re-throw to let calling code know it was cancelled
             }
             catch (System.Exception ex)
             {
@@ -388,18 +492,18 @@ namespace Netherlands3D.Tiles3D
             var featureAccessor = gltfFeatures.accessors[featureIdBufferViewIndex];
             var targetBufferView = gltfFeatures.bufferViews[featureAccessor.bufferView];
 
+            // Note: Compression is not supported in this implementation
             // var compressed = gltfFeatures.extensionsRequired.Contains("EXT_meshopt_compression"); //Needs testing
-            var compressed = false;
 
-            var featureIdBuffer = GetFeatureBuffer(gltfFeatures.buffers, targetBufferView, binaryBlob, compressed);
+            var featureIdBuffer = GetFeatureBuffer(gltfFeatures.buffers, targetBufferView, binaryBlob);
             if (featureIdBuffer == null || featureIdBuffer.Length == 0)
             {
                 Debug.LogWarning("Getting feature buffer failed.");
                 return;
             }
 
-            //Parse feature table into List<float>
-            List<Vector2Int> vertexFeatureIds = new();
+            //Parse feature table into reusable List to avoid heap allocations
+            reusableVertexFeatureIds.Clear();
             var stride = targetBufferView.byteStride;
             int currentFeatureTableIndex = -1;
             int vertexCount = 0;
@@ -412,7 +516,7 @@ namespace Netherlands3D.Tiles3D
                 if (currentFeatureTableIndex != featureTableIndex)
                 {
                     if (currentFeatureTableIndex != -1)
-                        vertexFeatureIds.Add(new Vector2Int(currentFeatureTableIndex, vertexCount));
+                        reusableVertexFeatureIds.Add(new Vector2Int(currentFeatureTableIndex, vertexCount));
 
                     currentFeatureTableIndex = featureTableIndex;
                     vertexCount = 1;
@@ -423,13 +527,13 @@ namespace Netherlands3D.Tiles3D
                 }
             }
             //Finish last feature table entry
-            vertexFeatureIds.Add(new Vector2Int(currentFeatureTableIndex, vertexCount));
+            reusableVertexFeatureIds.Add(new Vector2Int(currentFeatureTableIndex, vertexCount));
 
             //Retrieve EXT_structural_metadata tables
             var propertyTables = gltfFeatures.extensions.EXT_structural_metadata.propertyTables;
 
-            //Now parse the property tables BAGID 
-            var bagIdList = new List<string>();
+            //Now parse the property tables BAGID using reusable list
+            reusableBagIdList.Clear();
             foreach (var propertyTable in propertyTables)
             {
                 //Now parse the data from the buffer using stringOffsetType=UINT32
@@ -446,9 +550,9 @@ namespace Netherlands3D.Tiles3D
                 for (int i = 0; i < count; i++)
                 {
                     var stringBytesSpanSlice = stringBytesSpan.Slice(i * stringSpan, stringSpan);
-                    var stringBytes = stringBytesSpanSlice.ToArray();
-                    var stringBytesString = Encoding.ASCII.GetString(stringBytes);
-                    bagIdList.Add(stringBytesString);
+                    // Avoid ToArray() by using Encoding.ASCII.GetString(ReadOnlySpan<byte>)
+                    var stringBytesString = Encoding.ASCII.GetString(stringBytesSpanSlice);
+                    reusableBagIdList.Add(stringBytesString);
                 }
                 break; //Just support one for now.
             }
@@ -461,14 +565,16 @@ namespace Netherlands3D.Tiles3D
                 //Add subobjects to the spawned gameobject
                 child.gameObject.AddComponent<MeshCollider>();
                 ObjectMapping objectMapping = child.gameObject.AddComponent<ObjectMapping>();
-                objectMapping.items = new List<ObjectMappingItem>();
+                
+                // Clear and reuse ObjectMappingItem list to avoid per-child allocations
+                reusableObjectMappingItems.Clear();
 
                 //For each uniqueFeatureIds, add a subobject
                 int offset = 0;
-                for (int i = 0; i < vertexFeatureIds.Count; i++)
+                for (int i = 0; i < reusableVertexFeatureIds.Count; i++)
                 {
-                    var uniqueFeatureId = vertexFeatureIds[i];
-                    var bagId = bagIdList[uniqueFeatureId.x];
+                    var uniqueFeatureId = reusableVertexFeatureIds[i];
+                    var bagId = reusableBagIdList[uniqueFeatureId.x];
                     
                     //Remove any prefixes/additions to the bag id
                     bagId = Regex.Replace(bagId, "[^0-9]", "");
@@ -479,50 +585,25 @@ namespace Netherlands3D.Tiles3D
                         firstVertex = offset,
                         verticesLength = uniqueFeatureId.y
                     };
-                    objectMapping.items.Add(subObject);
+                    reusableObjectMappingItems.Add(subObject);
                     offset += uniqueFeatureId.y;
                 }
+                
+                // Copy to final list (ObjectMapping expects a List<ObjectMappingItem>)
+                objectMapping.items = new List<ObjectMappingItem>(reusableObjectMappingItems);
             }
             return;
 #endif
             Debug.LogWarning("Subobjects are not supported in this build. Please use the Netherlands3D.SubObjects package.");
         }
 
-        private byte[] GetFeatureBuffer(GltfMeshFeatures.Buffer[] buffers, GltfMeshFeatures.BufferView bufferView, byte[] glbBuffer, bool decompress)
+        private byte[] GetFeatureBuffer(GltfMeshFeatures.Buffer[] buffers, GltfMeshFeatures.BufferView bufferView, byte[] glbBuffer)
         {
-            //Because the mesh is compressed, we need to get the buffer and decompress it
-            var byteLength = decompress ? bufferView.extensions.EXT_meshopt_compression.byteLength : bufferView.byteLength;
-            var byteOffset = decompress ? bufferView.extensions.EXT_meshopt_compression.byteOffset : bufferView.byteOffset;
-
-            //Create NativeArray from byte[] glbBuffer
-            glbBufferNative = new NativeArray<byte>(glbBuffer, Allocator.Persistent);
-
-            //Create NativeSlice as part of the glbBuffer that the view is covering
-            source = glbBufferNative.Slice((int)byteOffset, (int)byteLength);
-            if(!decompress)
-            {
-                //Convert slice to byte[] array
-                Debug.Log("Use buffer directly");
-                return source.ToArray();
-            }
-            Debug.Log("Decompress buffer");
-            var byteStride = bufferView.extensions.EXT_meshopt_compression.byteStride;
-            var count = bufferView.extensions.EXT_meshopt_compression.count;   
-
-            //Create NativeArray to store the decompressed buffer
-            destination = new NativeArray<byte>(count * byteStride, Allocator.Persistent);
-
-            //Decompress using meshop decomression
-            var success = Decode.DecodeGltfBufferSync(
-                destination,
-                count,
-                byteStride,
-                source,
-                Meshoptimizer.Mode.Attributes,
-                Meshoptimizer.Filter.None
-            );
-
-            return destination.ToArray();
+            // Simple byte array copy - no compression support needed
+            Debug.Log("Use buffer directly");
+            byte[] result = new byte[bufferView.byteLength];
+            System.Array.Copy(glbBuffer, (int)bufferView.byteOffset, result, 0, (int)bufferView.byteLength);
+            return result;
         }
 
         public static (string, byte[]) ExtractJsonAndBinary(byte[] glbData)
@@ -579,33 +660,78 @@ namespace Netherlands3D.Tiles3D
         }
 
         /// <summary>
-        /// Dispose only NativeArrays to prevent memory leaks while keeping GltfImport alive
+        /// Clear reusable collections to prepare for reuse and prevent memory leaks
+        /// Call this when reusing a ParsedGltf instance for a new GLB file
         /// </summary>
-        public void DisposeNativeArrays()
+        public void ClearReusableCollections()
         {
-            if (glbBufferNative.IsCreated)
-            {
-                glbBufferNative.Dispose();
-            }
-            
-            if (destination.IsCreated)
-            {
-                destination.Dispose();
-            }
+            reusableVertexFeatureIds.Clear();
+            reusableBagIdList.Clear();
+            reusableObjectMappingItems.Clear();
+            uniqueColors.Clear();
         }
 
         /// <summary>
-        /// Dispose NativeArrays AND GltfImport - use only when completely done with content
+        /// Dispose GltfImport - use only when completely done with content
         /// </summary>
         public void Dispose()
         {
-            DisposeNativeArrays();
+            ClearReusableCollections();
             
-            // Also dispose the GltfImport if it exists
+            // Dispose the GltfImport if it exists
             if (gltfImport != null)
             {
                 gltfImport.Dispose();
                 gltfImport = null;
+            }
+        }
+
+
+
+        /// <summary>
+        /// Safe wrapper for InstantiateSceneAsync that handles destroyed GameObjects gracefully
+        /// </summary>
+        private async Task SafeInstantiateSceneAsync(GltfImport gltfImport, Transform parent, int sceneIndex, System.Threading.CancellationToken cancellationToken)
+        {
+            // Final validation before calling GLTFast
+            if (gltfImport == null)
+            {
+                throw new System.ObjectDisposedException("gltfImport");
+            }
+            
+            if (parent == null)
+            {
+                throw new UnityEngine.MissingReferenceException("parent Transform is null or destroyed");
+            }
+
+            // Additional Unity null check
+            if (parent == null)
+            {
+                throw new UnityEngine.MissingReferenceException("parent Transform GameObject was destroyed");
+            }
+
+            try
+            {
+                // Check cancellation one more time before the async call
+                cancellationToken.ThrowIfCancellationRequested();
+                
+                // Call GLTFast InstantiateSceneAsync directly but catch all Unity-related exceptions
+                await gltfImport.InstantiateSceneAsync(parent, sceneIndex);
+            }
+            catch (System.NullReferenceException ex)
+            {
+                // Convert to a more specific exception type we can handle
+                throw new UnityEngine.MissingReferenceException($"GameObject was destroyed during scene {sceneIndex} instantiation: {ex.Message}", ex);
+            }
+            catch (UnityEngine.MissingReferenceException)
+            {
+                // Re-throw MissingReferenceException as-is
+                throw;
+            }
+            catch (System.Exception ex) when (ex.Message.Contains("destroyed") || ex.Message.Contains("missing"))
+            {
+                // Catch any other exception that mentions destroyed or missing objects
+                throw new UnityEngine.MissingReferenceException($"GameObject reference error during scene {sceneIndex} instantiation: {ex.Message}", ex);
             }
         }
     }

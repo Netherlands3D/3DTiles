@@ -9,3 +9,7 @@ see the SampleScene for how to set it up.
 
 > Important: to be able to load google Earth 3DTiles, you need to install the package from https://github.com/Netherlands3D/Draco3DWebgl2022.git
 > for working in a webgl-build, you should add the shadergraphs in packages/gltfast/runtime/shader to "Always include shaders"-list in the projectsettings.
+
+## Documentation
+
+For detailed information about the tile loading architecture and flow, see [TILE_FLOW.md](TILE_FLOW.md).

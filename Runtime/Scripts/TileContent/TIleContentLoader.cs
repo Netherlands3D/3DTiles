@@ -11,7 +11,7 @@ using System.IO.Compression;
 
 namespace Netherlands3D.Tiles3D
 {
-    public class TIleContentLoader
+    public class TileContentLoader
     {
         public static bool debugLog = false;
         

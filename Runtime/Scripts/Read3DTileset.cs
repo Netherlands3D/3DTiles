@@ -10,6 +10,7 @@ using System.Collections.Specialized;
 using UnityEngine.Events;
 using GLTFast;
 using Netherlands3D.Coordinates;
+using System.Text.RegularExpressions;
 
 
 
@@ -46,9 +47,6 @@ namespace Netherlands3D.Tiles3D
 
         public ImplicitTilingSettings implicitTilingSettings;
 
-        public int tileCount;
-        public int nestingDepth;
-
         public bool parseAssetMetadata = false;
 #if SUBOBJECT
         public bool parseSubObjects = false;
@@ -60,20 +58,18 @@ namespace Netherlands3D.Tiles3D
 
         [SerializeField] private float sseComponent = -1;
         private List<Tile> visibleTiles = new List<Tile>();
+        
+        // Reusable collections to prevent heap allocations during tile management
+        private List<Tile> reusableTilesToRemove = new List<Tile>();
 
-        [SerializeField] private TilePrioritiser tilePrioritiser;
+        [SerializeField] private WebTilePrioritiser tilePrioritiser;
         private bool usingPrioritiser = true;
 
         private Camera currentCamera;
-        private Vector3 lastCameraPosition;
-        private Quaternion lastCameraRotation;
         private Vector3 currentCameraPosition;
         private Quaternion currentCameraRotation;
-        private float lastCameraAngle = 60;
 
         internal string tilesetFilename = "tileset.json";
-
-        private bool nestedTreeLoaded = false;
 
         [Header("Optional material override")] public Material materialOverride;
 
@@ -117,20 +113,39 @@ namespace Netherlands3D.Tiles3D
 
             uriBuilder.Query = queryString;
 
-            // Append the key query parameter
-#if UNITY_EDITOR
-            if (!string.IsNullOrEmpty(personalKey))
+            string keyToUse = "";
+
+            // Get API key from URL parameter in WebGL builds
+#if !UNITY_EDITOR && UNITY_WEBGL
+            string apiKeyFromUrl = GetUrlParamValue(Application.absoluteURL, "apikey");
+            if (!string.IsNullOrEmpty(apiKeyFromUrl))
             {
-                CredentialQuery = $"{QueryKeyName}={personalKey}";
-                uriBuilder.Query += CredentialQuery;
-            }
-#else
-            if (!string.IsNullOrEmpty(publicKey))
-            {
-                CredentialQuery = $"{QueryKeyName}={publicKey}";
-                uriBuilder.Query += CredentialQuery;
+                keyToUse = apiKeyFromUrl;
             }
 #endif
+
+            // Get API key from local file in Unity Editor
+#if UNITY_EDITOR
+            string configPath = System.IO.Path.Combine(Application.dataPath, "../google-apikey.txt");
+            if (System.IO.File.Exists(configPath))
+            {
+                try
+                {
+                    keyToUse = System.IO.File.ReadAllText(configPath).Trim();
+                }
+                catch (System.Exception ex)
+                {
+                    Debug.LogWarning($"Could not read API key from {configPath}: {ex.Message}");
+                }
+            }
+#endif
+
+            // Append the key query parameter if we have one
+            if (!string.IsNullOrEmpty(keyToUse))
+            {
+                CredentialQuery = $"{QueryKeyName}={keyToUse}";
+                uriBuilder.Query += CredentialQuery;
+            }
             tilesetUrl = uriBuilder.ToString();
         }
 
@@ -184,7 +199,7 @@ namespace Netherlands3D.Tiles3D
                 DisposeAllTilesRecursive(t);
             }
 
-            tilePrioritiser.RequestDispose(tile, true);
+            tilePrioritiser.DisposeImmediately(tile, true);
         }
 
         void InitializeURLAndLoadTileSet()
@@ -268,6 +283,19 @@ namespace Netherlands3D.Tiles3D
         }
 
         /// <summary>
+        /// Get URL parameter value from a URL string
+        /// </summary>
+        /// <param name="url">URL like "https://example.com?param=value&param2=value2"</param>
+        /// <param name="param">Parameter name to find</param>
+        /// <returns>Parameter value or null if not found</returns>
+        private string GetUrlParamValue(string url, string param)
+        {
+            var groups = Regex.Match(url, $"[?&]{param}=([^&#]*)").Groups;
+            if (groups.Count < 2) return null;
+            return groups[1].Value;
+        }
+
+        /// <summary>
         /// Change camera used by tileset 'in view' calculations
         /// </summary>
         /// <param name="camera">Target camera</param>
@@ -283,7 +311,7 @@ namespace Netherlands3D.Tiles3D
         /// <param name="tilesetUrl">The url pointing to tileset; https://.../tileset.json</param>
         /// <param name="maximumScreenSpaceError">The maximum screen space error for this tileset (default=5)</param>
         /// <param name="tilePrioritiser">Optional tile prioritisation system</param>
-        public void Initialize(string tilesetUrl,CoordinateSystem contentCoordinateystem = CoordinateSystem.WGS84_ECEF, int maximumScreenSpaceError = 5, TilePrioritiser tilePrioritiser = null)
+        public void Initialize(string tilesetUrl,CoordinateSystem contentCoordinateystem = CoordinateSystem.WGS84_ECEF, int maximumScreenSpaceError = 5, WebTilePrioritiser tilePrioritiser = null)
         {
             currentCamera = Camera.main;
             this.tilesetUrl = tilesetUrl;
@@ -296,8 +324,8 @@ namespace Netherlands3D.Tiles3D
         /// <summary>
         /// Optional injection of tile prioritiser system
         /// </summary>
-        /// <param name="tilePrioritiser">Prioritising system with TilePrioritiser base class. Set to null to disable.</param>
-        public void SetTilePrioritiser(TilePrioritiser tilePrioritiser)
+        /// <param name="tilePrioritiser">Prioritising system with WebTilePrioritiser class. Set to null to disable.</param>
+        public void SetTilePrioritiser(WebTilePrioritiser tilePrioritiser)
         {
             this.tilePrioritiser = tilePrioritiser;
             usingPrioritiser = (tilePrioritiser);
@@ -411,7 +439,7 @@ namespace Netherlands3D.Tiles3D
                 if (usingPrioritiser)
                 {
                     if (!tile.requestedUpdate)
-                        tilePrioritiser.RequestUpdate(tile);
+                        tilePrioritiser.AddToLoadQueue(tile);
                 }
                 else
                 {
@@ -419,22 +447,6 @@ namespace Netherlands3D.Tiles3D
                 }
             }
         }
-
-        private void RequestDispose(Tile tile)
-        {
-            if (!tile.content) return;
-
-            if (usingPrioritiser && !tile.requestedDispose)
-            {
-                tilePrioritiser.RequestDispose(tile);
-            }
-            else
-            {
-                tile.content.Dispose();
-                tile.content = null;                
-            }
-        }
-
 
         /// <summary>
         /// Check what tiles should be loaded/unloaded based on view recursively
@@ -446,8 +458,6 @@ namespace Netherlands3D.Tiles3D
             {
                 //If camera changed, recalculate what tiles are be in view
                 currentCamera.transform.GetPositionAndRotation(out currentCameraPosition, out currentCameraRotation);
-                lastCameraAngle = (currentCamera.orthographic ? currentCamera.orthographicSize : currentCamera.fieldOfView);
-                currentCamera.transform.GetPositionAndRotation(out lastCameraPosition, out lastCameraRotation);
 
                 SetSSEComponent(currentCamera);
                 DisposeTilesOutsideView(currentCamera);
@@ -458,6 +468,55 @@ namespace Netherlands3D.Tiles3D
 
                 yield return null;
             }
+        }
+
+        /// <summary>
+        /// Remove child tiles from visible list when a parent tile with enough detail is loaded
+        /// This prevents overdraw and reduces memory usage
+        /// </summary>
+        /// <param name="parentTile">The parent tile that was just loaded</param>
+        private void RemoveChildTilesFromVisible(Tile parentTile)
+        {
+            if (parentTile.children == null || parentTile.children.Count == 0)
+                return;
+
+            // Clear and reuse list to avoid per-tile heap allocations
+            reusableTilesToRemove.Clear();
+            foreach (var visibleTile in visibleTiles)
+            {
+                if (IsChildOfTile(visibleTile, parentTile))
+                {
+                    reusableTilesToRemove.Add(visibleTile);
+                }
+            }
+
+            // Then remove them
+            foreach (var tileToRemove in reusableTilesToRemove)
+            {
+                tilePrioritiser.DisposeImmediately(tileToRemove, true);
+                visibleTiles.Remove(tileToRemove);
+            }
+        }
+
+        /// <summary>
+        /// Check if a tile is a child (direct or indirect) of another tile
+        /// </summary>
+        /// <param name="potentialChild">The tile to check if it's a child</param>
+        /// <param name="potentialParent">The tile to check if it's a parent</param>
+        /// <returns>True if potentialChild is a child of potentialParent</returns>
+        private bool IsChildOfTile(Tile potentialChild, Tile potentialParent)
+        {
+            if (potentialChild == null || potentialParent == null)
+                return false;
+
+            Tile currentParent = potentialChild.parent;
+            while (currentParent != null)
+            {
+                if (currentParent == potentialParent)
+                    return true;
+                currentParent = currentParent.parent;
+            }
+            return false;
         }
 
         /// <summary>
@@ -481,7 +540,7 @@ namespace Netherlands3D.Tiles3D
                 var tileIsInView = tile.IsInViewFrustrum(currentCamera);
                 if (!tileIsInView)
                 {
-                    tilePrioritiser.RequestDispose(tile, true);
+                    tilePrioritiser.DisposeImmediately(tile, true);
                     visibleTiles.RemoveAt(i);
                     continue;
                 }
@@ -493,9 +552,9 @@ namespace Netherlands3D.Tiles3D
                     if (tile.parent.screenSpaceError<maximumScreenSpaceError) //parent tile also has enough detail
                     {
                         // can be removed if a parentTile is loaded
-                        if (tile.parent.CountLoadedParents() > 0)
+                        if (tile.parent.CountLoadedParents > 0)
                         {
-                            tilePrioritiser.RequestDispose(tile, true);
+                            tilePrioritiser.DisposeImmediately(tile, true);
                             visibleTiles.RemoveAt(i);
                             continue;
                         }
@@ -510,11 +569,11 @@ namespace Netherlands3D.Tiles3D
                     {
                         // tile should remain
                     }
-                    else if (tile.CountLoadingChildren() == 0)
+                    else if (tile.CountLoadingChildren == 0)
                     {
-                        if (tile.CountLoadedChildren() > 0)
+                        if (tile.CountLoadedChildren > 0)
                         {
-                            tilePrioritiser.RequestDispose(tile);
+                            tilePrioritiser.DisposeImmediately(tile);
 
                             visibleTiles.RemoveAt(i);
                         }
@@ -624,14 +683,16 @@ namespace Netherlands3D.Tiles3D
             {
                     if (Has3DContent)
                     {
-                        int loadingParentsCount = tile.CountLoadingParents();
-                        int loadedParentsCount = tile.CountLoadedParents();
+                        int loadingParentsCount = tile.CountLoadingParents;
+                        int loadedParentsCount = tile.CountLoadedParents;
                         //if (loadedParentsCount + loadingParentsCount < 2)
                         //{
                             if (!visibleTiles.Contains(tile))
                             {
                                 RequestContentUpdate(tile);
                                 visibleTiles.Add(tile);
+                                // When we load a parent tile with enough detail, remove child tiles to avoid overdraw
+                                RemoveChildTilesFromVisible(tile);
                             }
                         //}
                     }
@@ -671,7 +732,6 @@ namespace Netherlands3D.Tiles3D
 
                         JSONNode node = JSON.Parse(jsonstring)["root"];
                         ParseTileset.ReadExplicitNode(node, tile);
-                        nestedTreeLoaded = true;
                     }
                     OnServerResponseReceived.Invoke(www);
                 }

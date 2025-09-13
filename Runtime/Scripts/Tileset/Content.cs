@@ -1,9 +1,17 @@
 using GLTFast;
 using Netherlands3D.Coordinates;
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Events;
+using UnityEngine.Networking;
+using System.Text;
+using SimpleJSON;
+#if UNITY_EDITOR
+using System.IO.Compression;
+#endif
 
 
 namespace Netherlands3D.Tiles3D
@@ -31,6 +39,9 @@ namespace Netherlands3D.Tiles3D
 
         private UnityEngine.Material overrideMaterial;
         private GLTFast.GltfImport gltfImport; // Reference to dispose later
+        
+        // Cancellation token for async operations
+        private System.Threading.CancellationTokenSource cancellationTokenSource;
 
         Dictionary<string, string> headers = null;
         public enum ContentLoadState
@@ -98,21 +109,21 @@ namespace Netherlands3D.Tiles3D
 
             State = ContentLoadState.DOWNLOADING;
             parentTile.isLoading = true;
-            TIleContentLoader.debugLog = verbose;
+            
+            // Start download using TIleContentLoader
             runningContentRequest = StartCoroutine(
-           TIleContentLoader.DownloadContent(
-               uri,
-               transform,
-               ParentTile,
-               DownloadedData,
-               parseAssetMetaData,
-               parseSubObjects,
-               overrideMaterial,
-               false,
-               headers
-
-               )
-           );
+                Netherlands3D.Tiles3D.TileContentLoader.DownloadContent(
+                    uri,
+                    transform,
+                    ParentTile,
+                    DownloadedData,
+                    parseAssetMetaData,
+                    parseSubObjects,
+                    overrideMaterial,
+                    false,
+                    headers
+                )
+            );
             return;
            
         }
@@ -125,10 +136,22 @@ namespace Netherlands3D.Tiles3D
                 return;
             }
             
-            // Set state to PARSING to prevent dispose during async loading
+            // Check if we're still valid before starting async operation
+            if (this == null || gameObject == null)
+            {
+                Debug.LogWarning("Content destroyed before async loading could start");
+                return;
+            }
+            
+            // Create cancellation token for this async operation
+            if (cancellationTokenSource == null)
+                cancellationTokenSource = new System.Threading.CancellationTokenSource();
+            
+            // Set state to PARSING to indicate async operation in progress
             State = ContentLoadState.PARSING;
             
-            TIleContentLoader.LoadContent(
+            // Process the downloaded data using TIleContentLoader
+            _ = Netherlands3D.Tiles3D.TileContentLoader.LoadContent(
                 data,
                 uri,
                 transform,
@@ -136,10 +159,10 @@ namespace Netherlands3D.Tiles3D
                 FinishedLoading,
                 parseAssetMetaData,
                 parseSubObjects,
-                overrideMaterial, 
+                overrideMaterial,
                 false,
                 headers
-                );
+            );
         }
 
         /// <summary>

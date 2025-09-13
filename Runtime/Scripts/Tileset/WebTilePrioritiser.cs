@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using UnityEngine;
+using UnityEngine.Events;
 
 namespace Netherlands3D.Tiles3D
 {
@@ -9,16 +11,32 @@ namespace Netherlands3D.Tiles3D
     /// Modern browsers like Chrome limits parralel downloads from host to 6 per tab.
     /// Threading is not supported for WebGL, so this prioritiser spreads out actions to reduce framedrop spikes.
     /// This prioritiser takes center-of-screen into account combined with the 3D Tile SSE to determine tile priotities.
-    /// A delayed dispose list 
     /// </summary>
     /// 
-    public class WebTilePrioritiser : TilePrioritiser
-    { 
+    public class WebTilePrioritiser : MonoBehaviour
+    {
+        [DllImport("__Internal")]
+        private static extern bool isMobile();
+
+        [Header("SSE Screen height limitations (0 is disabled)")]
+        public int maxScreenHeightInPixels = 0;
+        public int maxScreenHeightInPixelsMobile = 0;
+
+        private bool mobileMode = false;
+        public bool MobileMode { get => mobileMode; set => mobileMode = value; }
+        public int MaxScreenHeightInPixels {
+            get
+            {
+                return (mobileMode) ? maxScreenHeightInPixelsMobile: maxScreenHeightInPixels;
+            }
+        }
+
+        public UnityEvent<bool> OnMobileModeEnabled;
+
         [Header("Web limitations")]
         [SerializeField] private int maxSimultaneousDownloads = 6;
 
-        [Header("Delay tile destroys"),Tooltip("Limit the amount of tiles that can be destroyed on delay")]
-        [SerializeField] private int maxTilesInDisposeList = 4;
+        // Removed delayed dispose functionality for simplified memory management
 
         [Header("Screen space error priority")]
         [SerializeField] private float screenSpaceErrorScoreMultiplier = 10;
@@ -29,7 +47,7 @@ namespace Netherlands3D.Tiles3D
 
         private Vector2 viewCenter = new Vector2(0.5f, 0.5f);
 
-        private List<Tile> delayedDisposeList = new List<Tile>();
+        // Removed delayedDisposeList for simplified immediate disposal
         private List<Tile> prioritisedTiles = new List<Tile>();
         public List<Tile> PrioritisedTiles { get => prioritisedTiles; private set => prioritisedTiles = value; }
 
@@ -48,8 +66,23 @@ namespace Netherlands3D.Tiles3D
 
         private void Awake() 
         {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            MobileMode = isMobile();
+#endif
+            OnMobileModeEnabled.Invoke(MobileMode);
+
             materialOverride = GetComponent<Read3DTileset>().materialOverride;
             debugLog = GetComponent<Read3DTileset>().debugLog;
+        }
+
+        public void SetMaxScreenHeightInPixels(float pixels)
+        {
+            maxScreenHeightInPixels = Mathf.RoundToInt(pixels);
+        }
+        
+        public void SetMaxScreenHeightInPixelsMobile(float pixels)
+        {
+            maxScreenHeightInPixelsMobile = Mathf.RoundToInt(pixels);
         }
 
         public void PauseDownloads(bool paused)
@@ -68,8 +101,10 @@ namespace Netherlands3D.Tiles3D
         /// <summary>
         /// Request update for this tile by adding it to the prioritised tile list.
         /// Highest priority will be loaded first.
+        /// <summary>
+        /// Add this tile to the priority queue for loading
         /// </summary>
-        public override void RequestUpdate(Tile tile)
+        public void AddToLoadQueue(Tile tile)
         {
             requirePriorityCheck = true;
             tile.requestedUpdate = true;
@@ -78,71 +113,17 @@ namespace Netherlands3D.Tiles3D
         }
 
         /// <summary>
-        /// Add this tile to the dispose list.
-        /// Using this list we can keep parent tiles visible untill their loading children are done.
+        /// Dispose this tile immediately.
+        /// Simplified approach - no delayed disposal for better memory management.
         /// </summary>
-        public override void RequestDispose(Tile tile, bool immediately=false)
+        public void DisposeImmediately(Tile tile, bool immediately=false)
         {
             PrioritisedTiles.Remove(tile);
             requirePriorityCheck = true;
 
-            bool anyChildLoading = false;
             tile.requestedDispose = true;
-            tile.childrenCountDelayingDispose = 0;
-
-            if (tile.CountLoadingChildren()+tile.CountLoadedChildren()>0) // there are active children
-            {
-                if (tile.CountLoadingChildren() > 0)
-                {
-                    anyChildLoading = true;
-                }
-            }
-
-            if(anyChildLoading && immediately==false)
-            {
-                delayedDisposeList.Add(tile);
-            }
-            else
-            {
-                Dispose(tile);
-            }
-
-        }
-
-        /// <summary>
-        /// Check the list of tiles where the dispose was delayed
-        /// </summary>
-        private void CheckDelayedDispose()
-        {
-            if (delayedDisposeList.Count > 0)
-            {
-                for (int i = delayedDisposeList.Count - 1; i >= 0; i--)
-                {
-                    var tile = delayedDisposeList[i];
-                    int loadingchildcount = tile.CountLoadingChildren();
-
-                    foreach (var child in tile.children)
-                    {
-                        if (loadingchildcount==0)
-                        {
-                            Dispose(tile);
-                            delayedDisposeList.RemoveAt(i);
-                        }
-                    }
-
-                    
-                }
-            }
-        }
-        
-
-        /// <summary>
-        /// Directly dispose this tile content
-        /// </summary>
-        public void Dispose(Tile tile)
-        {
             
-           
+            // Always dispose immediately for better memory management
             tile.Dispose();
             tile.requestedUpdate = false;
             tile.requestedDispose = false;
@@ -154,15 +135,14 @@ namespace Netherlands3D.Tiles3D
             {
                 CalculatePriorities();
             }
-
-            //Check delayed tile expose status
-            CheckDelayedDispose();
+            
+            // No more delayed dispose checking needed - simplified approach
         }
 
         /// <summary>
         /// Calculates the priority list for the added tiles
         /// </summary>
-        public override void CalculatePriorities()
+        public void CalculatePriorities()
         {
             foreach (var tile in PrioritisedTiles)
             {
@@ -170,8 +150,8 @@ namespace Netherlands3D.Tiles3D
                 priorityScore += DistanceScore(tile);
                 priorityScore += InViewCenterScore(tile.ContentBounds.center, screenCenterScore);
                 priorityScore += sseScore(tile);
-                int loadedChildren = tile.CountLoadedChildren();
-                int loadedParents = tile.CountLoadedParents();
+                int loadedChildren = tile.CountLoadedChildren;
+                int loadedParents = tile.CountLoadedParents;
                 if (loadedParents<1) // no parents loaded
                 {
                     priorityScore *= 10;
@@ -241,7 +221,7 @@ namespace Netherlands3D.Tiles3D
             return tile.screenSpaceError * screenSpaceErrorScoreMultiplier;
         }
 
-        public override void SetCamera(Camera currentMainCamera)
+        public void SetCamera(Camera currentMainCamera)
         {
             currentCamera = currentMainCamera;
         }
