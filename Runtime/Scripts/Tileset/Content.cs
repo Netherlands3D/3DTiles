@@ -22,6 +22,15 @@ namespace Netherlands3D.Tiles3D
         public string uri = "";
         public Coordinate contentCoordinate;
         public CoordinateSystem contentcoordinateSystem;
+        
+        // Memory tuning options
+        [Header("Memory Optimization")]
+        [Tooltip("Call UploadMeshData(true) on all spawned meshes to release CPU-side mesh data.")]
+        public bool makeMeshesNoLongerReadable = true;
+        [Tooltip("Attempt to make textures non-readable to release CPU-side texture data.")]
+        public bool makeTexturesNoLongerReadable = false;
+        [Tooltip("Dispose the GltfImport after instantiation to free parser buffers (keep spawned objects).")]
+        public bool disposeGltfImportAfterSpawn = false;
 
 #if SUBOBJECT
         public bool parseSubObjects = true;
@@ -462,12 +471,18 @@ namespace Netherlands3D.Tiles3D
                     OverrideAllMaterials(overrideMaterial);
                 }
 
-                // Free CPU-side GLTF data to reduce memory in WebGL
-                if (_gltfImportObject != null)
+                // Optionally release CPU-side copies
+                if (makeMeshesNoLongerReadable || makeTexturesNoLongerReadable)
+                    ReleaseCpuCopies(makeMeshesNoLongerReadable, makeTexturesNoLongerReadable);
+
+                // Optionally dispose import to free buffers
+                if (disposeGltfImportAfterSpawn && _gltfImportObject != null)
                 {
                     _gltfImportObject.Dispose();
                     _gltfImportObject = null;
                 }
+
+                
 
                 // Final validation before success
                 if (this == null || gameObject == null)
@@ -581,6 +596,17 @@ namespace Netherlands3D.Tiles3D
                     OverrideAllMaterials(overrideMaterial);
                 }
 
+                // Optionally release CPU-side copies
+                if (makeMeshesNoLongerReadable || makeTexturesNoLongerReadable)
+                    ReleaseCpuCopies(makeMeshesNoLongerReadable, makeTexturesNoLongerReadable);
+
+                // Optionally dispose import to free buffers
+                if (disposeGltfImportAfterSpawn && _gltfImportObject != null)
+                {
+                    _gltfImportObject.Dispose();
+                    _gltfImportObject = null;
+                }
+
                 // Final validation before success
                 if (this == null || gameObject == null)
                 {
@@ -662,6 +688,17 @@ namespace Netherlands3D.Tiles3D
                 if (overrideMaterial != null)
                 {
                     OverrideAllMaterials(overrideMaterial);
+                }
+
+                // Optionally release CPU-side copies
+                if (makeMeshesNoLongerReadable || makeTexturesNoLongerReadable)
+                    ReleaseCpuCopies(makeMeshesNoLongerReadable, makeTexturesNoLongerReadable);
+
+                // Optionally dispose import to free buffers
+                if (disposeGltfImportAfterSpawn && _gltfImportObject != null)
+                {
+                    _gltfImportObject.Dispose();
+                    _gltfImportObject = null;
                 }
 
                 // Final validation before success
@@ -997,6 +1034,72 @@ namespace Netherlands3D.Tiles3D
             {
                 renderer.material = material;
             }
+        }
+
+        // Release CPU copies of meshes and textures to reduce WebGL heap usage
+        private void ReleaseCpuCopies(bool releaseMeshes, bool releaseTextures)
+        {
+            if (this == null || gameObject == null) return;
+
+            if (releaseMeshes)
+            {
+                var meshFilters = gameObject.GetComponentsInChildren<MeshFilter>(true);
+                foreach (var mf in meshFilters)
+                {
+                    var mesh = mf.sharedMesh;
+                    if (mesh != null)
+                    {
+#if UNITY_2020_1_OR_NEWER
+                        try { mesh.UploadMeshData(true); } catch { }
+#endif
+                    }
+                }
+
+                var skinned = gameObject.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+                foreach (var smr in skinned)
+                {
+                    var mesh = smr.sharedMesh;
+                    if (mesh != null)
+                    {
+#if UNITY_2020_1_OR_NEWER
+                        try { mesh.UploadMeshData(true); } catch { }
+#endif
+                    }
+                }
+            }
+
+            if (releaseTextures)
+            {
+                var renderers = gameObject.GetComponentsInChildren<Renderer>(true);
+                foreach (var r in renderers)
+                {
+                    var mats = r.sharedMaterials;
+                    foreach (var mat in mats)
+                    {
+                        if (mat == null) continue;
+                        // Try common texture slots
+                        TryMakeNonReadable(mat, "_MainTex");
+                        TryMakeNonReadable(mat, "_BaseMap");
+                        TryMakeNonReadable(mat, "_BaseColorMap");
+                        TryMakeNonReadable(mat, "_MetallicGlossMap");
+                        TryMakeNonReadable(mat, "_BumpMap");
+                        TryMakeNonReadable(mat, "_OcclusionMap");
+                        TryMakeNonReadable(mat, "_EmissionMap");
+                    }
+                }
+            }
+        }
+
+        private static void TryMakeNonReadable(Material mat, string prop)
+        {
+            if (!mat.HasProperty(prop)) return;
+            var tex = mat.GetTexture(prop) as Texture2D;
+            if (tex == null) return;
+            try
+            {
+                tex.Apply(false, true); // makeNoLongerReadable
+            }
+            catch { }
         }
 
         private void PositionGameObject(Transform scene, double[] rtcCenter, Tile tile)

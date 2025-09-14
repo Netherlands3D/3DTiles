@@ -108,8 +108,11 @@ namespace Netherlands3D.Tiles3D
         {
             requirePriorityCheck = true;
             tile.requestedUpdate = true;
-
-            PrioritisedTiles.Add(tile);
+            // Avoid duplicates in the queue
+            if (!PrioritisedTiles.Contains(tile))
+            {
+                PrioritisedTiles.Add(tile);
+            }
         }
 
         /// <summary>
@@ -194,7 +197,9 @@ namespace Netherlands3D.Tiles3D
         /// <returns></returns>
         public float InViewCenterScore(Vector3 position, float maxScore)
         {
-            var position2D = Camera.main.WorldToViewportPoint(position);
+            var cam = currentCamera != null ? currentCamera : Camera.main;
+            if (cam == null) return 0f;
+            var position2D = cam.WorldToViewportPoint(position);
             var distance = Vector2.Distance(position2D, viewCenter);
 
             return maxScore * screenCenterWeight.Evaluate(1.0f - distance);
