@@ -31,6 +31,10 @@ namespace Netherlands3D.Tiles3D
         public bool makeTexturesNoLongerReadable = false;
         [Tooltip("Dispose the GltfImport after instantiation to free parser buffers (keep spawned objects).")]
         public bool disposeGltfImportAfterSpawn = false;
+        [Tooltip("Clamp texture size after load. 0 disables downscaling.")]
+        public int maxTextureSize = 0;
+        [Tooltip("Set all textures to Bilinear and anisoLevel=1 to limit sampling cost.")]
+        public bool simplifyTextureSampling = true;
 
 #if SUBOBJECT
         public bool parseSubObjects = true;
@@ -472,8 +476,11 @@ namespace Netherlands3D.Tiles3D
                 }
 
                 // Optionally release CPU-side copies
-                if (makeMeshesNoLongerReadable || makeTexturesNoLongerReadable)
+                if (makeMeshesNoLongerReadable || makeTexturesNoLongerReadable || simplifyTextureSampling || maxTextureSize > 0)
+                {
                     ReleaseCpuCopies(makeMeshesNoLongerReadable, makeTexturesNoLongerReadable);
+                    TuneTextures(simplifyTextureSampling, maxTextureSize);
+                }
 
                 // Optionally dispose import to free buffers
                 if (disposeGltfImportAfterSpawn && _gltfImportObject != null)
@@ -597,8 +604,11 @@ namespace Netherlands3D.Tiles3D
                 }
 
                 // Optionally release CPU-side copies
-                if (makeMeshesNoLongerReadable || makeTexturesNoLongerReadable)
+                if (makeMeshesNoLongerReadable || makeTexturesNoLongerReadable || simplifyTextureSampling || maxTextureSize > 0)
+                {
                     ReleaseCpuCopies(makeMeshesNoLongerReadable, makeTexturesNoLongerReadable);
+                    TuneTextures(simplifyTextureSampling, maxTextureSize);
+                }
 
                 // Optionally dispose import to free buffers
                 if (disposeGltfImportAfterSpawn && _gltfImportObject != null)
@@ -691,8 +701,11 @@ namespace Netherlands3D.Tiles3D
                 }
 
                 // Optionally release CPU-side copies
-                if (makeMeshesNoLongerReadable || makeTexturesNoLongerReadable)
+                if (makeMeshesNoLongerReadable || makeTexturesNoLongerReadable || simplifyTextureSampling || maxTextureSize > 0)
+                {
                     ReleaseCpuCopies(makeMeshesNoLongerReadable, makeTexturesNoLongerReadable);
+                    TuneTextures(simplifyTextureSampling, maxTextureSize);
+                }
 
                 // Optionally dispose import to free buffers
                 if (disposeGltfImportAfterSpawn && _gltfImportObject != null)
@@ -1100,6 +1113,82 @@ namespace Netherlands3D.Tiles3D
                 tex.Apply(false, true); // makeNoLongerReadable
             }
             catch { }
+        }
+
+        // Reduce texture sampling cost and optionally downscale too-large textures
+        private void TuneTextures(bool simplifySampling, int maxSize)
+        {
+            if (this == null || gameObject == null) return;
+
+            var processed = new System.Collections.Generic.HashSet<Texture2D>();
+            var renderers = gameObject.GetComponentsInChildren<Renderer>(true);
+            foreach (var r in renderers)
+            {
+                var mats = r.sharedMaterials;
+                foreach (var mat in mats)
+                {
+                    if (mat == null) continue;
+                    TuneTextureProperty(mat, "_MainTex", simplifySampling, maxSize, processed);
+                    TuneTextureProperty(mat, "_BaseMap", simplifySampling, maxSize, processed);
+                    TuneTextureProperty(mat, "_BaseColorMap", simplifySampling, maxSize, processed);
+                    TuneTextureProperty(mat, "_MetallicGlossMap", simplifySampling, maxSize, processed);
+                    TuneTextureProperty(mat, "_BumpMap", simplifySampling, maxSize, processed);
+                    TuneTextureProperty(mat, "_OcclusionMap", simplifySampling, maxSize, processed);
+                    TuneTextureProperty(mat, "_EmissionMap", simplifySampling, maxSize, processed);
+                }
+            }
+        }
+
+        private void TuneTextureProperty(Material mat, string prop, bool simplifySampling, int maxSize, System.Collections.Generic.HashSet<Texture2D> processed)
+        {
+            if (!mat.HasProperty(prop)) return;
+            var tex = mat.GetTexture(prop) as Texture2D;
+            if (tex == null) return;
+            if (processed.Contains(tex)) return;
+            processed.Add(tex);
+
+            if (simplifySampling)
+            {
+                tex.anisoLevel = 1;
+                tex.filterMode = FilterMode.Bilinear;
+            }
+
+            if (maxSize > 0 && (tex.width > maxSize || tex.height > maxSize))
+            {
+                var targetW = tex.width;
+                var targetH = tex.height;
+                float scale = (float)maxSize / Mathf.Max(tex.width, tex.height);
+                targetW = Mathf.Max(1, Mathf.RoundToInt(tex.width * scale));
+                targetH = Mathf.Max(1, Mathf.RoundToInt(tex.height * scale));
+
+                var downsized = DownscaleTexture(tex, targetW, targetH);
+                if (downsized != null)
+                {
+                    mat.SetTexture(prop, downsized);
+                    Destroy(tex);
+                }
+            }
+        }
+
+        private Texture2D DownscaleTexture(Texture2D src, int width, int height)
+        {
+            try
+            {
+                var prevActive = RenderTexture.active;
+                var rt = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32);
+                Graphics.Blit(src, rt);
+                var tex = new Texture2D(width, height, TextureFormat.RGBA32, false, false);
+                RenderTexture.active = rt;
+                tex.ReadPixels(new Rect(0, 0, width, height), 0, 0, false);
+                tex.Apply(false, true); // no mipmaps, non-readable
+                RenderTexture.active = prevActive;
+                RenderTexture.ReleaseTemporary(rt);
+                return tex;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private void PositionGameObject(Transform scene, double[] rtcCenter, Tile tile)
