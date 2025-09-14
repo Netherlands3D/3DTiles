@@ -194,9 +194,12 @@ namespace Netherlands3D.Tiles3D
             if (tile == null)
                 return;
 
-            foreach (var t in tile.children)
+            if (tile.ChildrenCount > 0)
             {
-                DisposeAllTilesRecursive(t);
+                foreach (var t in tile.children)
+                {
+                    DisposeAllTilesRecursive(t);
+                }
             }
 
             tilePrioritiser.DisposeImmediately(tile, true);
@@ -357,9 +360,12 @@ namespace Netherlands3D.Tiles3D
 
             tile.CalculateUnitBounds();
 
-            foreach (var child in tile.children)
+            if (tile.ChildrenCount > 0)
             {
-                RecalculateAllTileBounds(child);
+                foreach (var child in tile.children)
+                {
+                    RecalculateAllTileBounds(child);
+                }
             }
         }
 
@@ -374,9 +380,12 @@ namespace Netherlands3D.Tiles3D
 
             tile.boundsAvailable = false ;
 
-            foreach (var child in tile.children)
+            if (tile.ChildrenCount > 0)
             {
-                InvalidateAllTileBounds(child);
+                foreach (var child in tile.children)
+                {
+                    InvalidateAllTileBounds(child);
+                }
             }
         }
 
@@ -461,9 +470,12 @@ namespace Netherlands3D.Tiles3D
 
                 SetSSEComponent(currentCamera);
                 DisposeTilesOutsideView(currentCamera);
-                foreach (var child in root.children)
+                if (root.ChildrenCount > 0)
                 {
-                    LoadInViewRecursively(child, currentCamera);
+                    foreach (var child in root.children)
+                    {
+                        LoadInViewRecursively(child, currentCamera);
+                    }
                 }
 
                 yield return null;
@@ -477,7 +489,7 @@ namespace Netherlands3D.Tiles3D
         /// <param name="parentTile">The parent tile that was just loaded</param>
         private void RemoveChildTilesFromVisible(Tile parentTile)
         {
-            if (parentTile.children == null || parentTile.children.Count == 0)
+            if (parentTile.ChildrenCount == 0)
                 return;
 
             // Clear and reuse list to avoid per-tile heap allocations
@@ -628,14 +640,14 @@ namespace Netherlands3D.Tiles3D
                 return;
             }
 
-            if (tile.isLoading == false && tile.children.Count == 0 && tile.contentUri.Contains(".json"))
+            if (tile.isLoading == false && tile.ChildrenCount == 0 && tile.contentUri.Contains(".json"))
             {
                 tile.isLoading = true;
                 StartCoroutine(LoadNestedTileset(tile));
                 return;
             }
 
-            if (tile.isLoading == false && tile.children.Count == 0 && tile.contentUri.Contains(".subtree"))
+            if (tile.isLoading == false && tile.ChildrenCount == 0 && tile.contentUri.Contains(".subtree"))
             {
                 //UnityEngine.Debug.Log(tile.contentUri);
                 ReadSubtree subtreeReader = GetComponent<ReadSubtree>();
@@ -666,7 +678,7 @@ namespace Netherlands3D.Tiles3D
                         visibleTiles.Add(tile);
                     }
                 }
-                else if (tile.children.Count == 0 && Has3DContent) //show the geometry if more detailed geometry is not available
+                else if (tile.ChildrenCount == 0 && Has3DContent) //show the geometry if more detailed geometry is not available
                 {
                     if (!visibleTiles.Contains(tile))
                     {
@@ -674,9 +686,12 @@ namespace Netherlands3D.Tiles3D
                         visibleTiles.Add(tile);
                     }
                 }
-                foreach (var childTile in tile.children)
+                if (tile.ChildrenCount > 0)
                 {
-                    LoadInViewRecursively(childTile, currentCamera);
+                    foreach (var childTile in tile.children)
+                    {
+                        LoadInViewRecursively(childTile, currentCamera);
+                    }
                 }
             }
             else

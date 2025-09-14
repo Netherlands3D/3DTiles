@@ -38,13 +38,14 @@ namespace Netherlands3D.Tiles3D
 
         // tiletree properties
         public Tile parent;
-        public List<Tile> children = new List<Tile>();
+        private List<Tile> _children;
+        // Lazy children list to avoid per-instance allocation
+        public List<Tile> children { get { return _children ??= new List<Tile>(); } }
+        public int ChildrenCount => _children?.Count ?? 0;
         
 
         //tileproperties
-
         public TileTransform tileTransform = TileTransform.Identity();
-        public double[] transform = new double[16] { 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0 };
         public double geometricError;
         public float screenSpaceError = float.MaxValue;
         public string refine;

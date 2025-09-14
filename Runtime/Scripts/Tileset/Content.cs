@@ -462,6 +462,13 @@ namespace Netherlands3D.Tiles3D
                     OverrideAllMaterials(overrideMaterial);
                 }
 
+                // Free CPU-side GLTF data to reduce memory in WebGL
+                if (_gltfImportObject != null)
+                {
+                    _gltfImportObject.Dispose();
+                    _gltfImportObject = null;
+                }
+
                 // Final validation before success
                 if (this == null || gameObject == null)
                 {

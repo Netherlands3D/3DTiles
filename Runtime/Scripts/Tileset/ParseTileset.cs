@@ -35,7 +35,6 @@ namespace Netherlands3D.Tiles3D
                 }
             }
             root.tileTransform = new TileTransform(transformValues);
-            root.transform = transformValues;
             JSONNode implicitTilingNode = rootnode["implicitTiling"];
             if (implicitTilingNode != null)
             {
@@ -52,10 +51,8 @@ namespace Netherlands3D.Tiles3D
                     rootTile.tileSet = tileset;
                     rootTile.tileTransform = root.tileTransform;
                     root = ReadExplicitNode(rootnode, rootTile);
-                    
-                    rootTile.transform = root.transform;
 
-                    if (rootTile.children.Count==0 )
+                    if (rootTile.ChildrenCount == 0)
                     {
                         Tile childTile = new Tile();
                         childTile.tileSet = tileset;
@@ -76,11 +73,8 @@ namespace Netherlands3D.Tiles3D
                     rootTile.level = 0;
                     rootTile.X = 0;
                     rootTile.Y = 0;
-                    rootTile.transform = root.transform;
                     rootTile.tileTransform = root.tileTransform;
                     ReadImplicitTiling(rootnode,rootTile);
-
-                    rootTile.transform = root.transform;
                     root = rootTile;
                     break;
                 default:
@@ -131,14 +125,13 @@ namespace Netherlands3D.Tiles3D
             
             JSONNode childrenNode = node["children"];
 
-            tile.children = new List<Tile>();
+            // children list is lazy-initialized; no allocation here
             if (childrenNode != null)
             {
                 for (int i = 0; i < childrenNode.Count; i++)
                 {
                     var childTile = new Tile();
                     childTile.tileSet = tile.tileSet;
-                    childTile.transform = tile.transform;
                     childTile.parent = tile;
                     tile.children.Add(ReadExplicitNode(childrenNode[i], childTile));
                 }

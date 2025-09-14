@@ -19,13 +19,16 @@ namespace Netherlands3D.Tiles3D
                 return 0;
 
             int result = 0;
-            foreach (var childTile in tile.children)
+            if (tile.ChildrenCount > 0)
             {
-                if (childTile?.content != null && !childTile.contentUri.Contains(".json"))
+                foreach (var childTile in tile.children)
                 {
-                    if (childTile.content.State != Content.ContentLoadState.DOWNLOADED)
+                    if (childTile?.content != null && !childTile.contentUri.Contains(".json"))
                     {
-                        result++;
+                        if (childTile.content.State != Content.ContentLoadState.DOWNLOADED)
+                        {
+                            result++;
+                        }
                     }
                 }
             }
@@ -41,23 +44,26 @@ namespace Netherlands3D.Tiles3D
                 return 0;
 
             int result = 0;
-            foreach (var childTile in tile.children)
+            if (tile.ChildrenCount > 0)
             {
-                if (childTile?.content != null && !childTile.contentUri.Contains(".json"))
+                foreach (var childTile in tile.children)
                 {
-                    if (childTile.content.State == Content.ContentLoadState.DOWNLOADED)
+                    if (childTile?.content != null && !childTile.contentUri.Contains(".json"))
                     {
-                        result++;
+                        if (childTile.content.State == Content.ContentLoadState.DOWNLOADED)
+                        {
+                            result++;
+                        }
                     }
                 }
-            }
-            
-            // Recursively count loaded children
-            foreach (var childTile in tile.children)
-            {
-                if (childTile != null)
+
+                // Recursively count loaded children
+                foreach (var childTile in tile.children)
                 {
-                    result += CountLoadedChildren(childTile);
+                    if (childTile != null)
+                    {
+                        result += CountLoadedChildren(childTile);
+                    }
                 }
             }
             
@@ -116,14 +122,19 @@ namespace Netherlands3D.Tiles3D
         /// </summary>
         public static Vector3 EulerRotationToVertical(Tile tile)
         {
-            float posX = (float)(tile.transform[12] / 1000);
-            float posY = (float)(tile.transform[13] / 1000);
-            float posZ = (float)(tile.transform[14] / 1000);
+            // Use translation from TileTransform instead of raw double[16]
+            double tx = tile.tileTransform.m03;
+            double ty = tile.tileTransform.m13;
+            double tz = tile.tileTransform.m23;
 
-            float angleX = -Mathf.Rad2Deg * Mathf.Atan(posY / posZ);
-            float angleY = -Mathf.Rad2Deg * Mathf.Atan(posX / posZ);
-            float angleZ = -Mathf.Rad2Deg * Mathf.Atan(posY / posX);
-            
+            float posX = (float)(tx / 1000.0);
+            float posY = (float)(ty / 1000.0);
+            float posZ = (float)(tz / 1000.0);
+
+            float angleX = -Mathf.Rad2Deg * Mathf.Atan(posY / Mathf.Max(posZ, 1e-6f));
+            float angleY = -Mathf.Rad2Deg * Mathf.Atan(posX / Mathf.Max(posZ, 1e-6f));
+            float angleZ = -Mathf.Rad2Deg * Mathf.Atan(posY / Mathf.Max(posX, 1e-6f));
+
             return new Vector3(angleX, angleY, angleZ);
         }
 
@@ -132,9 +143,13 @@ namespace Netherlands3D.Tiles3D
         /// </summary>
         public static Quaternion RotationToVertical(Tile tile)
         {
-            float posX = (float)(tile.transform[12] / 1000000);
-            float posY = (float)(tile.transform[13] / 1000000);
-            float posZ = (float)(tile.transform[14] / 1000000);
+            double tx = tile.tileTransform.m03;
+            double ty = tile.tileTransform.m13;
+            double tz = tile.tileTransform.m23;
+
+            float posX = (float)(tx / 1_000_000.0);
+            float posY = (float)(ty / 1_000_000.0);
+            float posZ = (float)(tz / 1_000_000.0);
 
             return Quaternion.FromToRotation(new Vector3(posX, posY, posZ), new Vector3(0, 0, 1));
         }
@@ -372,7 +387,7 @@ namespace Netherlands3D.Tiles3D
         /// <returns>True if all children have downloaded content, or if no children exist</returns>
         public static bool ChildrenHaveContent(Tile tile)
         {
-            if (tile.children.Count > 0) 
+            if (tile.ChildrenCount > 0) 
             { 
                 foreach (var child in tile.children)
                 {
@@ -391,10 +406,13 @@ namespace Netherlands3D.Tiles3D
         public static int GetNestingDepth(Tile tile)
         {
             int maxDepth = 1;
-            foreach (var child in tile.children)
+            if (tile.ChildrenCount > 0)
             {
-                int depth = GetNestingDepth(child) + 1;
-                if (depth > maxDepth) maxDepth = depth;
+                foreach (var child in tile.children)
+                {
+                    int depth = GetNestingDepth(child) + 1;
+                    if (depth > maxDepth) maxDepth = depth;
+                }
             }
             return maxDepth;
         }
