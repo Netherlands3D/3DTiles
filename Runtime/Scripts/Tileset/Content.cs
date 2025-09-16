@@ -31,6 +31,10 @@ namespace Netherlands3D.Tiles3D
         public bool makeTexturesNoLongerReadable = false;
         [Tooltip("Dispose the GltfImport after instantiation to free parser buffers (keep spawned objects).")]
         public bool disposeGltfImportAfterSpawn = false;
+        [Tooltip("Call Resources.UnloadUnusedAssets (and optional GC.Collect) after spawning a tile.")]
+        public bool unloadUnusedAssetsAfterSpawn = false;
+        [Tooltip("When unloading unused assets, also force a GC.Collect (can stall; use sparingly).")]
+        public bool forceGCCollect = false;
         [Tooltip("Clamp texture size after load. 0 disables downscaling.")]
         public int maxTextureSize = 0;
         [Tooltip("Set all textures to Bilinear and anisoLevel=1 to limit sampling cost.")]
@@ -267,6 +271,26 @@ namespace Netherlands3D.Tiles3D
                 }
             }
 
+            // Clean up skinned meshes as well
+            var skinnedRenderers = this.gameObject.GetComponentsInChildren<SkinnedMeshRenderer>();
+            foreach (var smr in skinnedRenderers)
+            {
+                if (smr.sharedMesh != null)
+                {
+                    var mesh = smr.sharedMesh;
+                    smr.sharedMesh = null;
+                    mesh.Clear();
+                    Destroy(mesh);
+                }
+                if (smr.mesh != null)
+                {
+                    var mesh = smr.mesh;
+                    smr.sharedMesh = null;
+                    mesh.Clear();
+                    Destroy(mesh);
+                }
+            }
+
             // Also clean up colliders that might reference meshes
             if (this != null && gameObject != null)
             {
@@ -281,7 +305,14 @@ namespace Netherlands3D.Tiles3D
                 }
 
                 Destroy(this.gameObject);
-            }            
+            }
+
+            // Optionally unload unused assets after disposal
+            if (unloadUnusedAssetsAfterSpawn)
+            {
+                _ = Resources.UnloadUnusedAssets();
+                if (forceGCCollect) System.GC.Collect();
+            }
         }
 
         //todo we need to come up with a way to get all used texture slot property names from the gltf package
@@ -289,24 +320,47 @@ namespace Netherlands3D.Tiles3D
         {
             foreach (Renderer r in renderers)
             {
-                Material mat = r.sharedMaterial;
-                if (mat == null) continue;
+                var mats = r.sharedMaterials;
+                if (mats == null || mats.Length == 0) continue;
 
                 int mainTexNameID = NL3DShaders.MainTextureShaderProperty;
-
-                if (mat.HasProperty(mainTexNameID))
+                for (int i = 0; i < mats.Length; i++)
                 {
-                    Texture tex = mat.GetTexture(mainTexNameID);
+                    var mat = mats[i];
+                    if (mat == null) continue;
 
-                    if (tex != null)
+                    // If an override material is used, just detach it from the renderer
+                    if (overrideMaterial != null && mat == overrideMaterial)
                     {
-                        mat.SetTexture(mainTexNameID, null);
-                        UnityEngine.Object.Destroy(tex);
-                        tex = null;
+                        mats[i] = null;
+                        continue;
                     }
+
+                    // Clear commonly used texture slots to ensure WebGL textures are released
+                    TryClearAndDestroyTexture(mat, mainTexNameID);
+                    TryClearAndDestroyTexture(mat, Shader.PropertyToID("_BaseMap"));
+                    TryClearAndDestroyTexture(mat, Shader.PropertyToID("_BaseColorMap"));
+                    TryClearAndDestroyTexture(mat, Shader.PropertyToID("_MetallicGlossMap"));
+                    TryClearAndDestroyTexture(mat, Shader.PropertyToID("_SpecGlossMap"));
+                    TryClearAndDestroyTexture(mat, Shader.PropertyToID("_BumpMap"));
+                    TryClearAndDestroyTexture(mat, Shader.PropertyToID("_NormalMap"));
+                    TryClearAndDestroyTexture(mat, Shader.PropertyToID("_OcclusionMap"));
+                    TryClearAndDestroyTexture(mat, Shader.PropertyToID("_EmissionMap"));
+                    UnityEngine.Object.Destroy(mat);
+                    mats[i] = null;
                 }
-                UnityEngine.Object.Destroy(mat);
-                r.sharedMaterial = null;
+                r.sharedMaterials = mats;
+            }
+        }
+
+        private static void TryClearAndDestroyTexture(Material mat, int propId)
+        {
+            if (!mat || !mat.HasProperty(propId)) return;
+            var tex = mat.GetTexture(propId);
+            if (tex != null)
+            {
+                mat.SetTexture(propId, null);
+                UnityEngine.Object.Destroy(tex);
             }
         }
 
@@ -332,6 +386,8 @@ namespace Netherlands3D.Tiles3D
         {
             using (var webRequest = UnityWebRequest.Get(url))
             {
+                webRequest.disposeDownloadHandlerOnDispose = true;
+                webRequest.timeout = 30;
                 if (customHeaders != null)
                 {
                     foreach (var header in customHeaders)
@@ -411,8 +467,12 @@ namespace Netherlands3D.Tiles3D
                 return false;
             }
 
-            var memoryStream = new System.IO.MemoryStream(contentBytes);
+            var memoryStream = new System.IO.MemoryStream(contentBytes, writable: false);
             var b3dm = B3dmReader.ReadB3dm(memoryStream);
+            // Release references to big buffers as early as possible (WebGL heap relief)
+            memoryStream.Dispose();
+            memoryStream = null;
+            contentBytes = null;
             
             double[] rtcCenter = GetRTCCenterFromB3dm(b3dm);
 
@@ -447,66 +507,16 @@ namespace Netherlands3D.Tiles3D
 
             try
             {
-                // Check if component is still valid before proceeding
-                if (this == null || gameObject == null || transform == null)
-                {
-                    Debug.LogWarning("Content component destroyed, canceling B3DM processing");
-                    return false;
-                }
-
-                // Spawn scenes directly from Content
-                await SpawnGltfScenesAsync(transform, GltfImportObject, rtcCenter, cancellationTokenSource?.Token ?? default
+                return await FinalizeAfterSuccessfulLoadAsync(rtcCenter, sourceUri
 #if SUBOBJECT
                     , b3dm.GlbData
 #endif
                 );
-
-                // Check again after async operation in case component was destroyed
-                if (this == null || gameObject == null || transform == null)
-                {
-                    Debug.LogWarning("Content component destroyed during B3DM processing");
-                    return false;
-                }
-
-                gameObject.name = sourceUri;
-
-                if (overrideMaterial != null)
-                {
-                    OverrideAllMaterials(overrideMaterial);
-                }
-
-                // Optionally release CPU-side copies
-                if (makeMeshesNoLongerReadable || makeTexturesNoLongerReadable || simplifyTextureSampling || maxTextureSize > 0)
-                {
-                    ReleaseCpuCopies(makeMeshesNoLongerReadable, makeTexturesNoLongerReadable);
-                    TuneTextures(simplifyTextureSampling, maxTextureSize);
-                }
-
-                // Optionally dispose import to free buffers
-                if (disposeGltfImportAfterSpawn && _gltfImportObject != null)
-                {
-                    _gltfImportObject.Dispose();
-                    _gltfImportObject = null;
-                }
-
-                
-
-                // Final validation before success
-                if (this == null || gameObject == null)
-                {
-                    Debug.LogWarning("Content component destroyed before B3DM processing completed");
-                    return false;
-                }
-
-                return true;
             }
             catch (System.Exception ex)
             {
                 Debug.LogError($"Error processing B3DM content: {ex.Message}");
                 return false;
-            }
-            finally
-            {
             }
         }
 
@@ -532,10 +542,23 @@ namespace Netherlands3D.Tiles3D
             {
                 uri = new Uri(sourceUri);
             }
+            // Validate data before processing (must be before we clear the buffer)
+            if (contentBytes == null || contentBytes.Length == 0)
+            {
+                Debug.LogError("GLB data is null or empty");
+                return false;
+            }
+
+            // Optionally patch GLB JSON to remove RTC extension
             RemoveCesiumRtcFromRequieredExtentions(ref contentBytes);
-    
+
+            // Extract RTC center before we drop the buffer
+            double[] rtcCenter = GetRTCCenterFromGlb(contentBytes);
+
             // Use shared GltfImportObject instance directly
             success = await GltfImportObject.Load(contentBytes, uri, GetImportSettings());
+            // Now it's safe to drop the large buffer reference
+            contentBytes = null;
 
             // Check again after async operation
             if (this == null || gameObject == null || transform == null)
@@ -550,89 +573,14 @@ namespace Netherlands3D.Tiles3D
                 return false;
             }
             
-            // Validate data before processing
-            if (contentBytes == null || contentBytes.Length == 0)
-            {
-                Debug.LogError("GLB data is null or empty");
-                return false;
-            }
-
-            double[] rtcCenter = GetRTCCenterFromGlb(contentBytes);
             try
             {
-                // Check if this component and GameObject are still valid before proceeding
-                if (this == null || gameObject == null || transform == null)
-                {
-                    Debug.LogWarning("Content component or GameObject destroyed, canceling GLB processing");
-                    return false;
-                }
-
-                // Additional validation before spawning scenes
-                if (GltfImportObject == null)
-                {
-                    Debug.LogError("GltfImport is null, cannot spawn scenes");
-                    return false;
-                }
-
-                // Add timeout to prevent hanging
-                var timeout = System.TimeSpan.FromSeconds(30); // 30 second timeout
-                using (var cts = new System.Threading.CancellationTokenSource(timeout))
-                {
-                    try
-                    {
-                        await SpawnGltfScenesAsync(transform, GltfImportObject, rtcCenter, cancellationTokenSource?.Token ?? default);
-                    }
-                    catch (System.OperationCanceledException)
-                    {
-                        Debug.LogError("GLB processing timed out after 30 seconds");
-                        return false;
-                    }
-                }
-
-                // Check again after async operation in case component was destroyed
-                if (this == null || gameObject == null || transform == null)
-                {
-                    Debug.LogWarning("Content component or GameObject destroyed during GLB processing");
-                    return false;
-                }
-
-                gameObject.name = sourceUri;
-
-                if (overrideMaterial != null)
-                {
-                    OverrideAllMaterials(overrideMaterial);
-                }
-
-                // Optionally release CPU-side copies
-                if (makeMeshesNoLongerReadable || makeTexturesNoLongerReadable || simplifyTextureSampling || maxTextureSize > 0)
-                {
-                    ReleaseCpuCopies(makeMeshesNoLongerReadable, makeTexturesNoLongerReadable);
-                    TuneTextures(simplifyTextureSampling, maxTextureSize);
-                }
-
-                // Optionally dispose import to free buffers
-                if (disposeGltfImportAfterSpawn && _gltfImportObject != null)
-                {
-                    _gltfImportObject.Dispose();
-                    _gltfImportObject = null;
-                }
-
-                // Final validation before success
-                if (this == null || gameObject == null)
-                {
-                    Debug.LogWarning("Content component destroyed before GLB processing completed");
-                    return false;
-                }
-
-                return true;
+                return await FinalizeAfterSuccessfulLoadAsync(rtcCenter, sourceUri);
             }
             catch (System.Exception ex)
             {
                 Debug.LogError($"Error processing GLB content: {ex.Message}");
                 return false;
-            }
-            finally
-            {
             }
         }
 
@@ -677,60 +625,99 @@ namespace Netherlands3D.Tiles3D
 
             try
             {
-                // Check if component is still valid before proceeding
-                if (this == null || gameObject == null || transform == null)
-                {
-                    Debug.LogWarning("Content component destroyed, canceling GLTF processing");
-                    return false;
-                }
-
-                await SpawnGltfScenesAsync(transform, GltfImportObject, null, cancellationTokenSource?.Token ?? default);
-
-                // Check again after async operation in case component was destroyed
-                if (this == null || gameObject == null || transform == null)
-                {
-                    Debug.LogWarning("Content component destroyed during GLTF processing");
-                    return false;
-                }
-
-                gameObject.name = sourceUri;
-
-                if (overrideMaterial != null)
-                {
-                    OverrideAllMaterials(overrideMaterial);
-                }
-
-                // Optionally release CPU-side copies
-                if (makeMeshesNoLongerReadable || makeTexturesNoLongerReadable || simplifyTextureSampling || maxTextureSize > 0)
-                {
-                    ReleaseCpuCopies(makeMeshesNoLongerReadable, makeTexturesNoLongerReadable);
-                    TuneTextures(simplifyTextureSampling, maxTextureSize);
-                }
-
-                // Optionally dispose import to free buffers
-                if (disposeGltfImportAfterSpawn && _gltfImportObject != null)
-                {
-                    _gltfImportObject.Dispose();
-                    _gltfImportObject = null;
-                }
-
-                // Final validation before success
-                if (this == null || gameObject == null)
-                {
-                    Debug.LogWarning("Content component destroyed before GLTF processing completed");
-                    return false;
-                }
-
-                return true;
+                return await FinalizeAfterSuccessfulLoadAsync(null, sourceUri);
             }
             catch (System.Exception ex)
             {
                 Debug.LogError($"Error processing GLTF content: {ex.Message}");
                 return false;
             }
-            finally
+        }
+
+        private bool IsAlive()
+        {
+            return this != null && gameObject != null && transform != null;
+        }
+
+        private async Task<bool> FinalizeAfterSuccessfulLoadAsync(double[] rtcCenter, string sourceUri
+#if SUBOBJECT
+            , byte[] glbBuffer = null
+#endif
+        )
+        {
+            // Check if this component and GameObject are still valid before proceeding
+            if (!IsAlive())
             {
+                Debug.LogWarning("Content component destroyed, canceling processing");
+                return false;
             }
+
+            if (GltfImportObject == null)
+            {
+                Debug.LogError("GltfImport is null, cannot spawn scenes");
+                return false;
+            }
+
+            // Add timeout to prevent hanging
+            var timeout = System.TimeSpan.FromSeconds(30);
+            using (var cts = new System.Threading.CancellationTokenSource(timeout))
+            {
+                try
+                {
+                    await SpawnGltfScenesAsync(transform, GltfImportObject, rtcCenter, cancellationTokenSource?.Token ?? default
+#if SUBOBJECT
+                        , glbBuffer
+#endif
+                    );
+                }
+                catch (System.OperationCanceledException)
+                {
+                    Debug.LogError("Content processing timed out during scene instantiation");
+                    return false;
+                }
+            }
+
+            if (!IsAlive())
+            {
+                Debug.LogWarning("Content component destroyed during processing");
+                return false;
+            }
+
+            gameObject.name = sourceUri;
+
+            if (overrideMaterial != null)
+            {
+                OverrideAllMaterials(overrideMaterial);
+            }
+
+            // Optionally release CPU-side copies
+            if (makeMeshesNoLongerReadable || makeTexturesNoLongerReadable || simplifyTextureSampling || maxTextureSize > 0)
+            {
+                ReleaseCpuCopies(makeMeshesNoLongerReadable, makeTexturesNoLongerReadable);
+                TuneTextures(simplifyTextureSampling, maxTextureSize);
+            }
+
+            // Optionally dispose import to free buffers
+            if (disposeGltfImportAfterSpawn && _gltfImportObject != null)
+            {
+                _gltfImportObject.Dispose();
+                _gltfImportObject = null;
+            }
+
+            // Optionally unload unused assets/force GC to return memory
+            if (unloadUnusedAssetsAfterSpawn)
+            {
+                await Resources.UnloadUnusedAssets();
+                if (forceGCCollect) System.GC.Collect();
+            }
+
+            if (!IsAlive())
+            {
+                Debug.LogWarning("Content component destroyed before processing completed");
+                return false;
+            }
+
+            return true;
         }
         
         
@@ -1045,7 +1032,21 @@ namespace Netherlands3D.Tiles3D
             if (this == null || gameObject == null) return;
             foreach (var renderer in gameObject.GetComponentsInChildren<Renderer>())
             {
-                renderer.material = material;
+                try
+                {
+                    var mats = renderer.sharedMaterials;
+                    if (mats == null || mats.Length == 0)
+                    {
+                        renderer.sharedMaterial = material;
+                        continue;
+                    }
+                    for (int i = 0; i < mats.Length; i++) mats[i] = material;
+                    renderer.sharedMaterials = mats;
+                }
+                catch
+                {
+                    renderer.sharedMaterial = material;
+                }
             }
         }
 

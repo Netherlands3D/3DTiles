@@ -25,34 +25,41 @@ namespace Netherlands3D.Tiles3D
             }
 
 
-            var glbLength = b3dmHeader.fileLength - b3dmHeader.Length;
-
-            var glbBuffer = reader.ReadBytes(glbLength);
-
-            // remove the trailing glb padding characters if any
-
-            //int stride = 8;
-            byte paddingbyte = Encoding.UTF8.GetBytes(" ")[0];
-            List<byte> bytes = new List<byte>();
-            bytes.Capacity = glbBuffer.Length;
-            for (int i = 0; i < glbLength; i++)
+            // Read GLB efficiently: first read 12-byte header to get total GLB length,
+            // then read exactly that many bytes, avoiding an extra large buffer + trim copy.
+            var remaining = b3dmHeader.fileLength - b3dmHeader.Length;
+            if (remaining < 12)
             {
-
-                bytes.Add(glbBuffer[i]);
-
-            }
-            //readGltfByteSize
-            glbLength = bytes[11] * 256;
-            glbLength = (glbLength + bytes[10]) * 256;
-            glbLength = (glbLength + bytes[9]) * 256;
-            glbLength = glbLength + bytes[8];
-
-            for (int i = bytes.Capacity - 1; i >= glbLength; i--)
-            {
-                bytes.RemoveAt(i);
+                throw new EndOfStreamException("B3DM GLB segment too small to contain header");
             }
 
-            glbBuffer = bytes.ToArray();
+            // Read GLB header (12 bytes)
+            byte[] glbHeader = reader.ReadBytes(12);
+            if (glbHeader.Length != 12)
+            {
+                throw new EndOfStreamException("Failed to read GLB header from B3DM");
+            }
+
+            // Total GLB length stored at bytes 8..11 (little endian)
+            int totalGlbLength = glbHeader[11] * 256;
+            totalGlbLength = (totalGlbLength + glbHeader[10]) * 256;
+            totalGlbLength = (totalGlbLength + glbHeader[9]) * 256;
+            totalGlbLength = totalGlbLength + glbHeader[8];
+
+            if (totalGlbLength < 12)
+            {
+                throw new InvalidDataException($"Invalid GLB length {totalGlbLength}");
+            }
+
+            byte[] glbBuffer = new byte[totalGlbLength];
+            // Copy header
+            Buffer.BlockCopy(glbHeader, 0, glbBuffer, 0, 12);
+            int bytesToRead = totalGlbLength - 12;
+            int read = reader.Read(glbBuffer, 12, bytesToRead);
+            if (read != bytesToRead)
+            {
+                throw new EndOfStreamException($"Expected {bytesToRead} GLB bytes, got {read}");
+            }
 
             var b3dm = new B3dm
             {

@@ -39,10 +39,17 @@ namespace Netherlands3D.Tiles3D
         // Removed delayed dispose functionality for simplified memory management
 
         [Header("Screen space error priority")]
-        [SerializeField] private float screenSpaceErrorScoreMultiplier = 10;
+        [SerializeField] private float screenSpaceErrorScoreMultiplier = 10f;
 
-        [Header("Center of screen priority")]
-        [SerializeField] private float screenCenterScore = 10;
+        [Header("Center-first priority")]
+        [Tooltip("Prioritise tiles from the screen center outward.")]
+        [SerializeField] private bool useCenterOutwardPriority = true;
+        [SerializeField, Tooltip("Multiplier for center weight influence")] private float centerWeightMultiplier = 4f;
+        [SerializeField, Tooltip("Penalty applied when tile is off-screen (0..1)")] private float offscreenPenalty = 0.1f;
+        [SerializeField, Tooltip("Extra boost when no parents are loaded (helps popping roots near center) ")] private float parentNotLoadedBoost = 2f;
+
+        [Header("Center of screen curve")]        
+        [SerializeField] private float screenCenterScore = 10f;
         [SerializeField] AnimationCurve screenCenterWeight;
 
         private Vector2 viewCenter = new Vector2(0.5f, 0.5f);
@@ -149,17 +156,35 @@ namespace Netherlands3D.Tiles3D
         {
             foreach (var tile in PrioritisedTiles)
             {
-                var priorityScore = 0.0f;
-                priorityScore += DistanceScore(tile);
-                priorityScore += InViewCenterScore(tile.ContentBounds.center, screenCenterScore);
-                priorityScore += sseScore(tile);
-                int loadedChildren = tile.CountLoadedChildren;
-                int loadedParents = tile.CountLoadedParents;
-                if (loadedParents<1) // no parents loaded
+                var sse = Mathf.Max(0f, tile.screenSpaceError);
+
+                // Base score from SSE once (avoid double counting)
+                float score = sse * screenSpaceErrorScoreMultiplier;
+
+                // Center-first multiplier
+                if (useCenterOutwardPriority)
                 {
-                    priorityScore *= 10;
+                    float cw = CenterWeight(tile.ContentBounds.center);
+                    // Center weight multiplies the base score to ensure center dominates
+                    score *= (1f + cw * centerWeightMultiplier);
+
+                    // Off-screen tiles get a penalty
+                    if (!IsInView(tile)) score *= Mathf.Clamp01(offscreenPenalty);
                 }
-                tile.priority = (int)priorityScore;
+                else
+                {
+                    // Backward compatible additive center bonus, if desired
+                    score += InViewCenterScore(tile.ContentBounds.center, screenCenterScore);
+                }
+
+                // Modest boost if no parents loaded, but don’t dwarf center preference
+                int loadedParents = tile.CountLoadedParents;
+                if (loadedParents < 1)
+                {
+                    score *= parentNotLoadedBoost;
+                }
+
+                tile.priority = (int)score;
             }
 
             PrioritisedTiles.Sort((obj1, obj2) => obj2.priority.CompareTo(obj1.priority));
@@ -208,9 +233,8 @@ namespace Netherlands3D.Tiles3D
 
         public float sseScore(Tile tile)
         {
-            float result = 0;
-            result = tile.screenSpaceError * 100;
-            return result;
+            // Kept for compatibility but unused in new scoring; consider removing later
+            return tile.screenSpaceError * 100f;
         }
 
         /// <summary>
@@ -223,7 +247,30 @@ namespace Netherlands3D.Tiles3D
         /// <returns></returns>
         public float DistanceScore(Tile tile)
         {
+            // Deprecated: previously aliased to SSE; use new scoring in CalculatePriorities
             return tile.screenSpaceError * screenSpaceErrorScoreMultiplier;
+        }
+
+        private bool IsInView(Tile tile)
+        {
+            var cam = currentCamera != null ? currentCamera : Camera.main;
+            if (cam == null) return true; // don’t over-penalise if no camera
+            return tile.IsInViewFrustrum(cam);
+        }
+
+        private float CenterWeight(Vector3 position)
+        {
+            var cam = currentCamera != null ? currentCamera : Camera.main;
+            if (cam == null) return 0f;
+            var position2D = cam.WorldToViewportPoint(position);
+            var distance = Vector2.Distance(position2D, viewCenter);
+            float t = 1.0f - distance;
+            if (screenCenterWeight != null)
+            {
+                return Mathf.Clamp01(screenCenterWeight.Evaluate(t));
+            }
+            // Fallback: linear center weight
+            return Mathf.Clamp01(t);
         }
 
         public void SetCamera(Camera currentMainCamera)
