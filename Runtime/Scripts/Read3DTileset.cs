@@ -219,8 +219,7 @@ namespace Netherlands3D.Tiles3D
 
             ExtractDatasetPaths();
 
-            if(debugLog)
-                print("loading tilset from : " + tilesetUrl);
+            
             StartCoroutine(LoadTileset());
         }
 
@@ -239,20 +238,13 @@ namespace Netherlands3D.Tiles3D
 
             queryParameters = ParseQueryString(uri.Query);
             
-            if(debugLog)
-                Debug.Log($"Query url {ToQueryString(queryParameters)}");
     
             foreach (string segment in uri.Segments)
             {
                 if (segment.EndsWith(".json"))
                 {
                     tilesetFilename = segment;
-                    if (debugLog)
-                    {
-                        Debug.Log($"Dataset filename: {tilesetFilename}");
-                        Debug.Log($"Absolute path: {absolutePath}");
-                        Debug.Log($"Root path: {rootPath}");
-                    }
+                    
                     break;
                 }
             }
@@ -437,6 +429,7 @@ namespace Netherlands3D.Tiles3D
                 tile.content.State = Content.ContentLoadState.NOTLOADING;
                 tile.content.ParentTile = tile;
                 tile.content.uri = GetFullContentUri(tile);
+                
                 tile.content.parseAssetMetaData = parseAssetMetadata;
                 tile.content.onTileLoadCompleted.AddListener(OnTileLoaded.Invoke);
 #if SUBOBJECT
@@ -659,7 +652,10 @@ namespace Netherlands3D.Tiles3D
                 subtreeReader.isbusy = true;
                 tile.isLoading = true;
 
-                Debug.Log("try to download a subtree");
+                if (debugLog)
+                {
+                    Debug.Log("try to download a subtree");
+                }
                 subtreeReader.DownloadSubtree("", implicitTilingSettings, tile, subtreeLoaded);
                 return;
             }

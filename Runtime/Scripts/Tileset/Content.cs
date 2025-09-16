@@ -28,7 +28,7 @@ namespace Netherlands3D.Tiles3D
         [Tooltip("Call UploadMeshData(true) on all spawned meshes to release CPU-side mesh data.")]
         public bool makeMeshesNoLongerReadable = true;
         [Tooltip("Attempt to make textures non-readable to release CPU-side texture data.")]
-        public bool makeTexturesNoLongerReadable = false;
+        public bool makeTexturesNoLongerReadable = true;
         [Tooltip("Dispose the GltfImport after instantiation to free parser buffers (keep spawned objects).")]
         public bool disposeGltfImportAfterSpawn = false;
         [Tooltip("Call Resources.UnloadUnusedAssets (and optional GC.Collect) after spawning a tile.")]
@@ -36,7 +36,7 @@ namespace Netherlands3D.Tiles3D
         [Tooltip("When unloading unused assets, also force a GC.Collect (can stall; use sparingly).")]
         public bool forceGCCollect = false;
         [Tooltip("Clamp texture size after load. 0 disables downscaling.")]
-        public int maxTextureSize = 0;
+        public int maxTextureSize = 2048;
         [Tooltip("Set all textures to Bilinear and anisoLevel=1 to limit sampling cost.")]
         public bool simplifyTextureSampling = true;
 
@@ -54,6 +54,10 @@ namespace Netherlands3D.Tiles3D
         public UnityEvent<Content> onTileLoadCompleted = new();
 
         private UnityEngine.Material overrideMaterial;
+        [SerializeField] private bool verboseLog = true;
+        [Header("Debug/Logging")]
+        [Tooltip("Always log URLs of b3dm/glb content being requested/processed")] 
+        [SerializeField] private bool logContentUrls = false;
         
         // Lazy-initialized GltfImport with consistent configuration
         private GLTFast.GltfImport _gltfImportObject;
@@ -134,9 +138,15 @@ namespace Netherlands3D.Tiles3D
                 return;
 
             this.headers = headers;
+            this.verboseLog = verbose;
             if (overrideMaterial != null)
             {
                 this.overrideMaterial = overrideMaterial;
+            }
+
+            if (logContentUrls && !string.IsNullOrEmpty(uri))
+            {
+                Debug.Log($"[Tiles] Queue content: {uri}");
             }
 
             // Start async loading
@@ -282,13 +292,6 @@ namespace Netherlands3D.Tiles3D
                     mesh.Clear();
                     Destroy(mesh);
                 }
-                if (smr.mesh != null)
-                {
-                    var mesh = smr.mesh;
-                    smr.sharedMesh = null;
-                    mesh.Clear();
-                    Destroy(mesh);
-                }
             }
 
             // Also clean up colliders that might reference meshes
@@ -338,6 +341,7 @@ namespace Netherlands3D.Tiles3D
 
                     // Clear commonly used texture slots to ensure WebGL textures are released
                     TryClearAndDestroyTexture(mat, mainTexNameID);
+                    TryClearAndDestroyTexture(mat, Shader.PropertyToID("_MainTexture"));
                     TryClearAndDestroyTexture(mat, Shader.PropertyToID("_BaseMap"));
                     TryClearAndDestroyTexture(mat, Shader.PropertyToID("_BaseColorMap"));
                     TryClearAndDestroyTexture(mat, Shader.PropertyToID("_MetallicGlossMap"));
@@ -346,6 +350,8 @@ namespace Netherlands3D.Tiles3D
                     TryClearAndDestroyTexture(mat, Shader.PropertyToID("_NormalMap"));
                     TryClearAndDestroyTexture(mat, Shader.PropertyToID("_OcclusionMap"));
                     TryClearAndDestroyTexture(mat, Shader.PropertyToID("_EmissionMap"));
+                    TryClearAndDestroyTexture(mat, Shader.PropertyToID("_SecondaryTexture"));
+                    TryClearAndDestroyTexture(mat, Shader.PropertyToID("_MaskTexture"));
                     UnityEngine.Object.Destroy(mat);
                     mats[i] = null;
                 }
@@ -394,6 +400,15 @@ namespace Netherlands3D.Tiles3D
                         webRequest.SetRequestHeader(header.Key, header.Value);
                 }
 
+                if (logContentUrls)
+                {
+                    Debug.Log($"[Tiles] Content URL: {url}");
+                }
+
+                if (verboseLog)
+                {
+                    Debug.Log($"[Tiles] Downloading: {url}");
+                }
                 yield return webRequest.SendWebRequest();
 
                 if (webRequest.result != UnityWebRequest.Result.Success)
@@ -403,6 +418,11 @@ namespace Netherlands3D.Tiles3D
                 }
                 else
                 {
+                    if (verboseLog)
+                    {
+                        var size = webRequest.downloadedBytes > 0 ? webRequest.downloadedBytes : (ulong)webRequest.downloadHandler.data?.Length;
+                        Debug.Log($"[Tiles] Downloaded: {url} ({size} bytes)");
+                    }
                     tcs.SetResult(webRequest.downloadHandler.data);
                 }
             }
@@ -424,6 +444,10 @@ namespace Netherlands3D.Tiles3D
             // Handle different content types
             try
             {
+                if (logContentUrls && !string.IsNullOrEmpty(sourceUri))
+                {
+                    Debug.Log($"[Tiles] Processing content URL: {sourceUri} ({contentType})");
+                }
                 switch (contentType)
                 {
                     case ContentType.b3dm:
@@ -451,7 +475,7 @@ namespace Netherlands3D.Tiles3D
 
         private async Task<bool> ProcessB3dmAsync(byte[] contentBytes, string sourceUri)
         {
-            Debug.Log("Starting B3DM processing");
+            if (verboseLog) Debug.Log($"[Tiles] Processing B3DM from: {sourceUri}");
 
             // Early validation - check if component is still valid
             if (this == null || gameObject == null || transform == null)
@@ -528,6 +552,7 @@ namespace Netherlands3D.Tiles3D
                 Debug.LogWarning("Content component destroyed before GLB processing started");
                 return false;
             }
+            if (verboseLog) Debug.Log($"[Tiles] Processing GLB from: {sourceUri}");
 
             // Check cancellation token
             if (cancellationTokenSource != null && cancellationTokenSource.Token.IsCancellationRequested)
@@ -1092,6 +1117,7 @@ namespace Netherlands3D.Tiles3D
                     {
                         if (mat == null) continue;
                         // Try common texture slots
+                        TryMakeNonReadable(mat, "_MainTexture");
                         TryMakeNonReadable(mat, "_MainTex");
                         TryMakeNonReadable(mat, "_BaseMap");
                         TryMakeNonReadable(mat, "_BaseColorMap");
@@ -1099,6 +1125,8 @@ namespace Netherlands3D.Tiles3D
                         TryMakeNonReadable(mat, "_BumpMap");
                         TryMakeNonReadable(mat, "_OcclusionMap");
                         TryMakeNonReadable(mat, "_EmissionMap");
+                        TryMakeNonReadable(mat, "_SecondaryTexture");
+                        TryMakeNonReadable(mat, "_MaskTexture");
                     }
                 }
             }
@@ -1130,12 +1158,15 @@ namespace Netherlands3D.Tiles3D
                 {
                     if (mat == null) continue;
                     TuneTextureProperty(mat, "_MainTex", simplifySampling, maxSize, processed);
+                    TuneTextureProperty(mat, "_MainTexture", simplifySampling, maxSize, processed);
                     TuneTextureProperty(mat, "_BaseMap", simplifySampling, maxSize, processed);
                     TuneTextureProperty(mat, "_BaseColorMap", simplifySampling, maxSize, processed);
                     TuneTextureProperty(mat, "_MetallicGlossMap", simplifySampling, maxSize, processed);
                     TuneTextureProperty(mat, "_BumpMap", simplifySampling, maxSize, processed);
                     TuneTextureProperty(mat, "_OcclusionMap", simplifySampling, maxSize, processed);
                     TuneTextureProperty(mat, "_EmissionMap", simplifySampling, maxSize, processed);
+                    TuneTextureProperty(mat, "_SecondaryTexture", simplifySampling, maxSize, processed);
+                    TuneTextureProperty(mat, "_MaskTexture", simplifySampling, maxSize, processed);
                 }
             }
         }

@@ -209,6 +209,7 @@ namespace Netherlands3D.Tiles3D
                 if (!pauseNewDownloads && tile.content && tile.content.State == Content.ContentLoadState.NOTLOADING)
                 {
                     downloadAvailable--;
+                    // Removed noisy start-loading log
                     tile.content.Load(materialOverride, verbose:debugLog);
                     tile.content.onDoneDownloading.AddListener(TileCompletedLoading);
                 }
