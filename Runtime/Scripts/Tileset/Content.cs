@@ -59,22 +59,6 @@ namespace Netherlands3D.Tiles3D
         [Tooltip("Always log URLs of b3dm/glb content being requested/processed")] 
         [SerializeField] private bool logContentUrls = false;
         
-        // Lazy-initialized GltfImport with consistent configuration
-        private GLTFast.GltfImport _gltfImportObject;
-        public GLTFast.GltfImport GltfImportObject
-        {
-            get
-            {
-                if (_gltfImportObject == null)
-                {
-                    var consoleLogger = new GLTFast.Logging.ConsoleLogger();
-                    var materialGenerator = new NL3DMaterialGenerator();
-                    _gltfImportObject = new GLTFast.GltfImport(null, null, materialGenerator, consoleLogger);
-                }
-                return _gltfImportObject;
-            }
-        }
-        
         // Cancellation token for async operations
         private System.Threading.CancellationTokenSource cancellationTokenSource;
         private Coroutine runningDownloadCoroutine;
@@ -242,13 +226,6 @@ namespace Netherlands3D.Tiles3D
             }
            
             State = ContentLoadState.NOTLOADING;
-
-            // Dispose GltfImport instance to free native memory
-            if (_gltfImportObject != null)
-            {
-                _gltfImportObject.Dispose();
-                _gltfImportObject = null;
-            }
 
             // Check if GameObject is still valid before proceeding with component cleanup
             if (this == null || gameObject == null)
@@ -513,34 +490,48 @@ namespace Netherlands3D.Tiles3D
                 uri = new Uri(sourceUri);
             }
     
-            // Use shared GltfImportObject instance directly
-            success = await GltfImportObject.Load(b3dm.GlbData, uri, GetImportSettings()); // Use modern Load method instead of obsolete LoadGltfBinary
-
-            // Check again after async operation
-            if (this == null || gameObject == null || transform == null)
-            {
-                Debug.LogWarning("Content component destroyed during B3DM loading");
-                return false;
-            }
-
-            if (success == false)
-            {
-                Debug.Log("cant load b3dm: " + sourceUri);
-                return false;
-            }
-
+            var import = await GltfImportPool.Acquire();
+            bool disposeImport = disposeGltfImportAfterSpawn;
             try
             {
-                return await FinalizeAfterSuccessfulLoadAsync(rtcCenter, sourceUri
+                success = await import.Load(b3dm.GlbData, uri, GetImportSettings());
+
+                if (!IsAlive())
+                {
+                    Debug.LogWarning("Content component destroyed during B3DM loading");
+                    disposeImport = true;
+                    return false;
+                }
+
+                if (!success)
+                {
+                    Debug.Log("cant load b3dm: " + sourceUri);
+                    disposeImport = true;
+                    return false;
+                }
+
+                var finalized = await FinalizeAfterSuccessfulLoadAsync(import, rtcCenter, sourceUri
 #if SUBOBJECT
                     , b3dm.GlbData
 #endif
                 );
+
+                if (!finalized)
+                {
+                    disposeImport = true;
+                }
+
+                return finalized;
             }
             catch (System.Exception ex)
             {
                 Debug.LogError($"Error processing B3DM content: {ex.Message}");
+                disposeImport = true;
                 return false;
+            }
+            finally
+            {
+                ReturnImport(import, disposeImport);
             }
         }
 
@@ -580,32 +571,43 @@ namespace Netherlands3D.Tiles3D
             // Extract RTC center before we drop the buffer
             double[] rtcCenter = GetRTCCenterFromGlb(contentBytes);
 
-            // Use shared GltfImportObject instance directly
-            success = await GltfImportObject.Load(contentBytes, uri, GetImportSettings());
-            // Now it's safe to drop the large buffer reference
-            contentBytes = null;
-
-            // Check again after async operation
-            if (this == null || gameObject == null || transform == null)
-            {
-                Debug.LogWarning("Content component destroyed during GLB loading");
-                return false;
-            }
-
-            if (success == false)
-            {
-                Debug.Log("cant load glb: " + sourceUri);
-                return false;
-            }
-            
+            var import = await GltfImportPool.Acquire();
+            bool disposeImport = disposeGltfImportAfterSpawn;
             try
             {
-                return await FinalizeAfterSuccessfulLoadAsync(rtcCenter, sourceUri);
+                success = await import.Load(contentBytes, uri, GetImportSettings());
+                contentBytes = null;
+
+                if (!IsAlive())
+                {
+                    Debug.LogWarning("Content component destroyed during GLB loading");
+                    disposeImport = true;
+                    return false;
+                }
+
+                if (!success)
+                {
+                    Debug.Log("cant load glb: " + sourceUri);
+                    disposeImport = true;
+                    return false;
+                }
+
+                var finalized = await FinalizeAfterSuccessfulLoadAsync(import, rtcCenter, sourceUri);
+                if (!finalized)
+                {
+                    disposeImport = true;
+                }
+                return finalized;
             }
             catch (System.Exception ex)
             {
                 Debug.LogError($"Error processing GLB content: {ex.Message}");
+                disposeImport = true;
                 return false;
+            }
+            finally
+            {
+                ReturnImport(import, disposeImport);
             }
         }
 
@@ -632,30 +634,42 @@ namespace Netherlands3D.Tiles3D
                 uri = new Uri(sourceUri);
             }
     
-            // Use shared GltfImportObject instance directly
-            success = await GltfImportObject.Load(uri);
-
-            // Check again after async operation
-            if (this == null || gameObject == null || transform == null)
-            {
-                Debug.LogWarning("Content component destroyed during GLTF loading");
-                return false;
-            }
-
-            if (success == false)
-            {
-                Debug.Log("cant load gltf: " + sourceUri);
-                return false;
-            }
-
+            var import = await GltfImportPool.Acquire();
+            bool disposeImport = disposeGltfImportAfterSpawn;
             try
             {
-                return await FinalizeAfterSuccessfulLoadAsync(null, sourceUri);
+                success = await import.Load(uri);
+
+                if (!IsAlive())
+                {
+                    Debug.LogWarning("Content component destroyed during GLTF loading");
+                    disposeImport = true;
+                    return false;
+                }
+
+                if (!success)
+                {
+                    Debug.Log("cant load gltf: " + sourceUri);
+                    disposeImport = true;
+                    return false;
+                }
+
+                var finalized = await FinalizeAfterSuccessfulLoadAsync(import, null, sourceUri);
+                if (!finalized)
+                {
+                    disposeImport = true;
+                }
+                return finalized;
             }
             catch (System.Exception ex)
             {
                 Debug.LogError($"Error processing GLTF content: {ex.Message}");
+                disposeImport = true;
                 return false;
+            }
+            finally
+            {
+                ReturnImport(import, disposeImport);
             }
         }
 
@@ -664,7 +678,19 @@ namespace Netherlands3D.Tiles3D
             return this != null && gameObject != null && transform != null;
         }
 
-        private async Task<bool> FinalizeAfterSuccessfulLoadAsync(double[] rtcCenter, string sourceUri
+        private static void ReturnImport(GLTFast.GltfImport import, bool dispose)
+        {
+            if (dispose)
+            {
+                GltfImportPool.ReleaseAndDispose(import);
+            }
+            else
+            {
+                GltfImportPool.Release(import);
+            }
+        }
+
+        private async Task<bool> FinalizeAfterSuccessfulLoadAsync(GLTFast.GltfImport import, double[] rtcCenter, string sourceUri
 #if SUBOBJECT
             , byte[] glbBuffer = null
 #endif
@@ -677,7 +703,7 @@ namespace Netherlands3D.Tiles3D
                 return false;
             }
 
-            if (GltfImportObject == null)
+            if (import == null)
             {
                 Debug.LogError("GltfImport is null, cannot spawn scenes");
                 return false;
@@ -689,7 +715,7 @@ namespace Netherlands3D.Tiles3D
             {
                 try
                 {
-                    await SpawnGltfScenesAsync(transform, GltfImportObject, rtcCenter, cancellationTokenSource?.Token ?? default
+                    await SpawnGltfScenesAsync(transform, import, rtcCenter, cancellationTokenSource?.Token ?? default
 #if SUBOBJECT
                         , glbBuffer
 #endif
@@ -720,13 +746,6 @@ namespace Netherlands3D.Tiles3D
             {
                 ReleaseCpuCopies(makeMeshesNoLongerReadable, makeTexturesNoLongerReadable);
                 TuneTextures(simplifyTextureSampling, maxTextureSize);
-            }
-
-            // Optionally dispose import to free buffers
-            if (disposeGltfImportAfterSpawn && _gltfImportObject != null)
-            {
-                _gltfImportObject.Dispose();
-                _gltfImportObject = null;
             }
 
             // Optionally unload unused assets/force GC to return memory
