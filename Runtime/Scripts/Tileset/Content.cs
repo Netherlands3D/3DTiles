@@ -54,7 +54,7 @@ namespace Netherlands3D.Tiles3D
         public UnityEvent<Content> onTileLoadCompleted = new();
 
         private UnityEngine.Material overrideMaterial;
-        [SerializeField] private bool verboseLog = true;
+        public static Action<Content> OnContentCreated;
         [Header("Debug/Logging")]
         [Tooltip("Always log URLs of b3dm/glb content being requested/processed")] 
         [SerializeField] private bool logContentUrls = false;
@@ -62,6 +62,11 @@ namespace Netherlands3D.Tiles3D
         // Cancellation token for async operations
         private System.Threading.CancellationTokenSource cancellationTokenSource;
         private Coroutine runningDownloadCoroutine;
+
+        private void Awake()
+        {
+            OnContentCreated?.Invoke(this);
+        }
 
         Dictionary<string, string> headers = null;
         public enum ContentLoadState
@@ -116,13 +121,12 @@ namespace Netherlands3D.Tiles3D
         /// <summary>
         /// Load the content from an url
         /// </summary>
-        public void Load(UnityEngine.Material overrideMaterial = null, Dictionary<string, string> headers = null, bool verbose = false)
+        public void Load(UnityEngine.Material overrideMaterial = null, Dictionary<string, string> headers = null)
         {
             if (State == ContentLoadState.DOWNLOADING || State == ContentLoadState.DOWNLOADED)
                 return;
 
             this.headers = headers;
-            this.verboseLog = verbose;
             if (overrideMaterial != null)
             {
                 this.overrideMaterial = overrideMaterial;
@@ -355,11 +359,18 @@ namespace Netherlands3D.Tiles3D
         private async Task<byte[]> DownloadContentCoroutineAsync(string url, Dictionary<string, string> customHeaders = null)
         {
             var tcs = new TaskCompletionSource<byte[]>();
-            
+
             // Start coroutine and wait for completion
             runningDownloadCoroutine = StartCoroutine(DownloadContentCoroutine(url, customHeaders, tcs));
-            
-            return await tcs.Task;
+
+            try
+            {
+                return await tcs.Task;
+            }
+            finally
+            {
+                runningDownloadCoroutine = null;
+            }
         }
 
         /// <summary>
@@ -382,10 +393,6 @@ namespace Netherlands3D.Tiles3D
                     Debug.Log($"[Tiles] Content URL: {url}");
                 }
 
-                if (verboseLog)
-                {
-                    Debug.Log($"[Tiles] Downloading: {url}");
-                }
                 yield return webRequest.SendWebRequest();
 
                 if (webRequest.result != UnityWebRequest.Result.Success)
@@ -395,11 +402,6 @@ namespace Netherlands3D.Tiles3D
                 }
                 else
                 {
-                    if (verboseLog)
-                    {
-                        var size = webRequest.downloadedBytes > 0 ? webRequest.downloadedBytes : (ulong)webRequest.downloadHandler.data?.Length;
-                        Debug.Log($"[Tiles] Downloaded: {url} ({size} bytes)");
-                    }
                     tcs.SetResult(webRequest.downloadHandler.data);
                 }
             }
@@ -452,8 +454,6 @@ namespace Netherlands3D.Tiles3D
 
         private async Task<bool> ProcessB3dmAsync(byte[] contentBytes, string sourceUri)
         {
-            if (verboseLog) Debug.Log($"[Tiles] Processing B3DM from: {sourceUri}");
-
             // Early validation - check if component is still valid
             if (this == null || gameObject == null || transform == null)
             {
@@ -543,8 +543,6 @@ namespace Netherlands3D.Tiles3D
                 Debug.LogWarning("Content component destroyed before GLB processing started");
                 return false;
             }
-            if (verboseLog) Debug.Log($"[Tiles] Processing GLB from: {sourceUri}");
-
             // Check cancellation token
             if (cancellationTokenSource != null && cancellationTokenSource.Token.IsCancellationRequested)
             {

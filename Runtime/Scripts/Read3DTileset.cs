@@ -445,7 +445,7 @@ namespace Netherlands3D.Tiles3D
                 }
                 else
                 {
-                    tile.content.Load(materialOverride, verbose:debugLog);
+                    tile.content.Load(materialOverride);
                 }
             }
         }

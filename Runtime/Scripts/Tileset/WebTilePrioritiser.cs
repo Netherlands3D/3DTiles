@@ -210,7 +210,7 @@ namespace Netherlands3D.Tiles3D
                 {
                     downloadAvailable--;
                     // Removed noisy start-loading log
-                    tile.content.Load(materialOverride, verbose:debugLog);
+                    tile.content.Load(materialOverride);
                     tile.content.onDoneDownloading.AddListener(TileCompletedLoading);
                 }
             }
