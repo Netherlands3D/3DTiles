@@ -68,6 +68,32 @@ namespace Netherlands3D.Tiles3D
             OnContentCreated?.Invoke(this);
         }
 
+        private void OnDestroy()
+        {
+            // Ensure parent tile releases its reference even if we get destroyed externally
+            if (parentTile != null && parentTile.content == this)
+            {
+                parentTile.content = null;
+            }
+
+            // Defensive: stop pending async work so no callbacks run on a destroyed component
+            if (cancellationTokenSource != null)
+            {
+                cancellationTokenSource.Cancel();
+                cancellationTokenSource.Dispose();
+                cancellationTokenSource = null;
+            }
+
+            if (runningDownloadCoroutine != null)
+            {
+                StopCoroutine(runningDownloadCoroutine);
+                runningDownloadCoroutine = null;
+            }
+
+            onDoneDownloading.RemoveAllListeners();
+            onTileLoadCompleted.RemoveAllListeners();
+        }
+
         Dictionary<string, string> headers = null;
         public enum ContentLoadState
         {
