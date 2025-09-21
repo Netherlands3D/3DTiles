@@ -12,4 +12,8 @@ see the SampleScene for how to set it up.
 
 ## Documentation
 
-For detailed information about the tile loading architecture and flow, see [TILE_FLOW.md](TILE_FLOW.md).
+
+
+For a conceptual overview of 3D Tiles, explicit & implicit tiling, quadtrees, and Morton index, see [3dtiles-introduction.md](Docs/3dtiles-introduction.md).
+
+For detailed information about the tile loading architecture and flow, see [tile_flow.md](Docs/tile_flow.md).
