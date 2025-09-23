@@ -413,6 +413,19 @@ namespace Netherlands3D.Tiles3D
             OnServerResponseReceived.Invoke(www);
         }
 
+        // Helper om de diepte van een tile te bepalen (root=0)
+        private int GetTileDepth(Tile tile)
+        {
+            int depth = 0;
+            var current = tile.parent;
+            while (current != null)
+            {
+                depth++;
+                current = current.parent;
+            }
+            return depth;
+        }
+
         private void RequestContentUpdate(Tile tile)
         {
             if (tile.content!=null)
@@ -421,8 +434,16 @@ namespace Netherlands3D.Tiles3D
             }
             if (!tile.content)
             {
+                int tileDepth = GetTileDepth(tile);
+                string parentName = $"Depth_{tileDepth}";
+                GameObject parentGO = GameObject.Find(parentName);
+                if (parentGO == null)
+                {
+                    parentGO = new GameObject(parentName);
+                    parentGO.transform.SetParent(transform, false);
+                }
                 var newContentGameObject = new GameObject($"{tile.level},{tile.X},{tile.Y} content");
-                newContentGameObject.transform.SetParent(transform, false);
+                newContentGameObject.transform.SetParent(parentGO.transform, false);
                 newContentGameObject.layer = gameObject.layer;
                 tile.content = newContentGameObject.AddComponent<Content>();
                 tile.content.tilesetReader = this;
@@ -448,6 +469,9 @@ namespace Netherlands3D.Tiles3D
                     tile.content.Load(materialOverride);
                 }
             }
+            // Log de diepte en contentUri
+            int depth = GetTileDepth(tile);
+            Debug.Log($"Tile loaded: depth={depth}, contentUri={tile.contentUri}");
         }
 
         /// <summary>
