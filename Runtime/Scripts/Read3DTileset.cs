@@ -55,6 +55,10 @@ namespace Netherlands3D.Tiles3D
         [Tooltip("Limits amount of detail higher resolution would cause to load.")]
         public int maxScreenHeightInPixels = 1080;
         public int maximumScreenSpaceError = 5;
+    // [Header("Refinement tuning")]
+    // [Tooltip("Multiplier to control preference for coarser tiles. >1 => prefer larger (coarser) tiles earlier; <1 => prefer more detail sooner.")]
+    // [Range(0.25f, 4f)]
+    private float coarsenessFactor = 3.0f;
 
         [SerializeField] private float sseComponent = -1;
         private List<Tile> visibleTiles = new List<Tile>();
@@ -74,6 +78,10 @@ namespace Netherlands3D.Tiles3D
         [Header("Optional material override")] public Material materialOverride;
 
         [Header("Debugging")] public bool debugLog;
+        [Tooltip("When enabled, tiles with content will show a colored plane per tile instead of downloading the GLB. Useful for testing layout and gaps.")]
+        private bool useColorPlanes = false;
+        [Tooltip("Gap factor between adjacent tiles (0..0.5). 0.02 = 2% gap.")]
+        public float colorPlaneGapFactor = 0.02f;
         
         public string[] usedExtensions { get; private set; }
 
@@ -113,34 +121,8 @@ namespace Netherlands3D.Tiles3D
 
             uriBuilder.Query = queryString;
 
-            string keyToUse = "";
-
-            // Get API key from URL parameter in WebGL builds
-#if !UNITY_EDITOR && UNITY_WEBGL
-            string apiKeyFromUrl = GetUrlParamValue(Application.absoluteURL, "apikey");
-            if (!string.IsNullOrEmpty(apiKeyFromUrl))
-            {
-                keyToUse = apiKeyFromUrl;
-            }
-#endif
-
-            // Get API key from local file in Unity Editor
-#if UNITY_EDITOR
-            string configPath = System.IO.Path.Combine(Application.dataPath, "../google-apikey.txt");
-            if (System.IO.File.Exists(configPath))
-            {
-                try
-                {
-                    keyToUse = System.IO.File.ReadAllText(configPath).Trim();
-                }
-                catch (System.Exception ex)
-                {
-                    Debug.LogWarning($"Could not read API key from {configPath}: {ex.Message}");
-                }
-            }
-#endif
-
-            // Append the key query parameter if we have one
+            // Use explicit keys set via the UI (personalKey overrides publicKey)
+            string keyToUse = !string.IsNullOrEmpty(personalKey) ? personalKey : publicKey;
             if (!string.IsNullOrEmpty(keyToUse))
             {
                 CredentialQuery = $"{QueryKeyName}={keyToUse}";
@@ -442,6 +424,115 @@ namespace Netherlands3D.Tiles3D
                     parentGO = new GameObject(parentName);
                     parentGO.transform.SetParent(transform, false);
                 }
+
+                // If useColorPlanes is enabled, create a simple placeholder plane and mark content as downloaded
+                if (useColorPlanes)
+                {
+                    var colorPlaneGO = new GameObject($"{tile.level},{tile.X},{tile.Y} colorplane");
+                    colorPlaneGO.transform.SetParent(parentGO.transform, false);
+                    colorPlaneGO.layer = gameObject.layer;
+
+                    var contentComp = colorPlaneGO.AddComponent<Content>();
+                    contentComp.tilesetReader = this;
+                    contentComp.State = Content.ContentLoadState.DOWNLOADED;
+                    contentComp.ParentTile = tile;
+                    tile.content = contentComp;
+
+                    // Create colored quad sized to tile bounds with small gap
+                    Bounds b = tile.ContentBounds;
+                    if (b.size == Vector3.zero)
+                    {
+                        tile.CalculateUnitBounds();
+                        b = tile.ContentBounds;
+                    }
+
+                    float gapFactor = Mathf.Clamp(colorPlaneGapFactor, 0f, 0.5f);
+                    Vector3 size = b.size;
+                    Vector3 scaled = new Vector3(Mathf.Max(0.001f, size.x * (1f - gapFactor)), 1f, Mathf.Max(0.001f, size.z * (1f - gapFactor)));
+
+                    // Create a quad mesh manually (avoids CreatePrimitive which adds colliders and can produce warnings)
+                    var quad = new GameObject("placeholder_quad");
+                    quad.transform.SetParent(colorPlaneGO.transform, false);
+                    quad.transform.position = b.center;
+                    // Force the quad to face world-up so parent rotations don't flip it
+                    quad.transform.up = Vector3.up;
+                    quad.transform.localScale = new Vector3(scaled.x, 1f, scaled.z);
+
+                    var mf = quad.AddComponent<MeshFilter>();
+                    var mr = quad.AddComponent<MeshRenderer>();
+
+                    Mesh mesh = new Mesh();
+                    mesh.name = "placeholder_quad_mesh";
+                    mesh.vertices = new Vector3[] {
+                        new Vector3(-0.5f, 0f, -0.5f),
+                        new Vector3(0.5f, 0f, -0.5f),
+                        new Vector3(0.5f, 0f, 0.5f),
+                        new Vector3(-0.5f, 0f, 0.5f)
+                    };
+                    mesh.uv = new Vector2[] { new Vector2(0,0), new Vector2(1,0), new Vector2(1,1), new Vector2(0,1) };
+                    // Ensure triangle winding produces upward-facing normals (visible from above)
+                    mesh.triangles = new int[] { 0,2,1, 0,3,2 };
+                    mesh.normals = new Vector3[] { Vector3.up, Vector3.up, Vector3.up, Vector3.up };
+                    // Ensure normals/bounds are consistent with world-up
+                    mesh.RecalculateNormals();
+                    mesh.RecalculateBounds();
+                    mf.mesh = mesh;
+
+                    // Generate or assign material with color per depth, fall back if shader missing
+                    // Robust shader fallback for WebGL builds where some shaders may be stripped
+                    Shader colorShader = Shader.Find("Unlit/Color");
+                    if (colorShader == null) colorShader = Shader.Find("Sprites/Default");
+                    if (colorShader == null) colorShader = Shader.Find("Standard");
+                    Material mat;
+                    if (colorShader != null)
+                    {
+                        mat = new Material(colorShader);
+                        // Common color property name across shaders
+                        if (mat.HasProperty("_Color"))
+                        {
+                            Color c = Color.HSVToRGB((tileDepth * 0.15f) % 1f, 0.6f, 0.9f);
+                            mat.SetColor("_Color", c);
+                        }
+                    }
+                    else
+                    {
+                        // As a last resort create a default material and tint with vertex color
+                        mat = new Material(Shader.Find("Sprites/Default"));
+                        Color c = Color.HSVToRGB((tileDepth * 0.15f) % 1f, 0.6f, 0.9f);
+                        if (mat.HasProperty("_Color")) mat.SetColor("_Color", c);
+                    }
+                    mr.sharedMaterial = mat;
+
+                    // Add a thin border using LineRenderer to show tile edges
+                    var borderGo = new GameObject("border");
+                    borderGo.transform.SetParent(colorPlaneGO.transform, false);
+                    var lr = borderGo.AddComponent<LineRenderer>();
+                    lr.positionCount = 5;
+                    lr.loop = true;
+                    lr.useWorldSpace = true;
+                    lr.startWidth = Mathf.Max(0.01f, Mathf.Min(size.x, size.z) * 0.002f);
+                    lr.endWidth = lr.startWidth;
+                    Shader borderShader = Shader.Find("Unlit/Color") ?? Shader.Find("Sprites/Default") ?? Shader.Find("Standard");
+                    Material borderMat = (borderShader != null) ? new Material(borderShader) : new Material(Shader.Find("Sprites/Default"));
+                    if (borderMat.HasProperty("_Color")) borderMat.SetColor("_Color", Color.black);
+                    lr.material = borderMat;
+                    float hx = scaled.x * 0.5f;
+                    float hz = scaled.z * 0.5f;
+                    Vector3 center = b.center;
+                    lr.SetPosition(0, center + new Vector3(-hx, 0.01f, -hz));
+                    lr.SetPosition(1, center + new Vector3(hx, 0.01f, -hz));
+                    lr.SetPosition(2, center + new Vector3(hx, 0.01f, hz));
+                    lr.SetPosition(3, center + new Vector3(-hx, 0.01f, hz));
+                    lr.SetPosition(4, center + new Vector3(-hx, 0.01f, -hz));
+
+                    // Notify listeners that content is available
+                    contentComp.onTileLoadCompleted.AddListener(OnTileLoaded.Invoke);
+                    contentComp.onTileLoadCompleted.Invoke(contentComp);
+                    contentComp.onDoneDownloading.Invoke();
+                    return;
+                }
+
+                // Default behaviour: create Content component and request real content
                 var newContentGameObject = new GameObject($"{tile.level},{tile.X},{tile.Y} content");
                 newContentGameObject.transform.SetParent(parentGO.transform, false);
                 newContentGameObject.layer = gameObject.layer;
@@ -686,7 +777,9 @@ namespace Netherlands3D.Tiles3D
 
             var closestPointOnBounds = tile.ContentBounds.ClosestPoint(currentCamera.transform.position); //Returns original point when inside the bounds
             CalculateTileScreenSpaceError(tile, currentCamera, closestPointOnBounds);
-            var enoughDetail = tile.screenSpaceError < maximumScreenSpaceError;
+            // Apply coarseness factor: values >1 favor larger (coarser) tiles earlier
+            var adjustedMaximumSSE = maximumScreenSpaceError * Mathf.Clamp(coarsenessFactor, 0.01f, 100f);
+            var enoughDetail = tile.screenSpaceError < adjustedMaximumSSE;
             var Has3DContent = tile.contentUri.Length > 0 && !tile.contentUri.Contains(".json") && !tile.contentUri.Contains(".subtree");
             if (enoughDetail == false)  
             {

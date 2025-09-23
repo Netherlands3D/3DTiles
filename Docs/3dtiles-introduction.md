@@ -93,3 +93,13 @@ This allows fast lookup and traversal of tiles in memory or on disk.
 ---
 
 *This page is a living document and can be expanded as the project evolves.*
+
+## Abbreviations & terms
+
+- SSE — Screen Space Error. A metric used to decide whether a tile's geometric error is acceptable given its projected size on screen. Lower SSE means higher perceived detail; SSE is typically compared to a threshold to determine whether to refine (load children) or use the parent tile.
+- LOD — Level of Detail. Refers to the depth/level in the tile hierarchy; higher LODs are more detailed (smaller tiles).
+- GLB — Binary GLTF. A single-file binary GLTF asset that contains geometry, textures and materials; commonly used as content payloads for 3D Tiles.
+- ECEF — Earth-Centered, Earth-Fixed. A Cartesian coordinate system centered at the Earth's center; often used for global geospatial positioning.
+- SSE component / sseComponent — A camera- and screen-dependent scalar used when calculating screen-space error (often derived from screen height and camera FOV). Multiplying geometricError by this component produces a screen-space scaled error.
+- REPLACE / ADD — Refinement modes for tiles: REPLACE means a parent tile replaces its children when rendered; ADD means parent and children are rendered together (additive refinement).
+
