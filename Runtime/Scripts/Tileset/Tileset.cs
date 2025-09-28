@@ -1,4 +1,5 @@
 using SimpleJSON;
+using System.Text;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -167,9 +168,26 @@ namespace Netherlands3D.Tiles3D
             }
         }
 
-        private void receiveTileset(DownloadHandler downloadHandler)
+        private void receiveTileset(byte[] data)
         {
-            tilesetJSON = JSON.Parse(downloadHandler.text);
+            if (data == null)
+            {
+                Debug.LogError($"Failed to download tileset from {tilesetUrl}");
+                return;
+            }
+
+            string text;
+            try
+            {
+                text = Encoding.UTF8.GetString(data);
+            }
+            catch
+            {
+                Debug.LogError("Failed to decode tileset bytes as UTF8.");
+                return;
+            }
+
+            tilesetJSON = JSON.Parse(text);
 
             ReadVersion(tilesetJSON["asset"]);
 
