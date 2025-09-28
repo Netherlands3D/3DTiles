@@ -17,7 +17,18 @@ namespace Netherlands3D.Tiles3D
             var memoryStream = new System.IO.MemoryStream(data);
 
             var reader = new BinaryReader(memoryStream) ;
-            var header = new B3dmHeader(reader);
+            // Inline B3DM header parsing to avoid external dependency on B3dmHeader
+            var header = new {
+                Magic = Encoding.UTF8.GetString(reader.ReadBytes(4)),
+                Version = (int)reader.ReadUInt32(),
+                fileLength = (int)reader.ReadUInt32(),
+                FeatureTableJsonByteLength = (int)reader.ReadUInt32(),
+                FeatureTableBinaryByteLength = (int)reader.ReadUInt32(),
+                BatchTableJsonByteLength = (int)reader.ReadUInt32(),
+                BatchTableBinaryByteLength = (int)reader.ReadUInt32()
+            };
+            // Ensure this async method yields to avoid compiler warning when no other awaits are present.
+            await Task.Yield();
             int headerLength = 28;
 
             string featureTableJSONString = Encoding.UTF8.GetString(data, headerLength, header.FeatureTableJsonByteLength);
@@ -33,7 +44,6 @@ namespace Netherlands3D.Tiles3D
             //required
             
             JSONNode node;
-            JSONNode offsetNode;
 
             node = featureTable["POINTS_LENGTH"];
             if (node == null)

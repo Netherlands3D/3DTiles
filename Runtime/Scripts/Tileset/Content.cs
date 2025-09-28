@@ -56,8 +56,8 @@ namespace Netherlands3D.Tiles3D
         private UnityEngine.Material overrideMaterial;
         public static Action<Content> OnContentCreated;
         [Header("Debug/Logging")]
-        [Tooltip("Always log URLs of b3dm/glb content being requested/processed")] 
-        [SerializeField] private bool logContentUrls = false;
+    [Tooltip("Always log URLs of b3dm/glb content being requested/processed")] 
+    [SerializeField] private bool logContentUrls = false;
         
         // Cancellation token for async operations
         private System.Threading.CancellationTokenSource cancellationTokenSource;
@@ -494,20 +494,84 @@ namespace Netherlands3D.Tiles3D
                 return false;
             }
 
-            var memoryStream = new System.IO.MemoryStream(contentBytes, writable: false);
-            var b3dm = B3dmReader.ReadB3dm(memoryStream);
-            // Release references to big buffers as early as possible (WebGL heap relief)
-            memoryStream.Dispose();
-            memoryStream = null;
-            contentBytes = null;
-            
-            double[] rtcCenter = GetRTCCenterFromB3dm(b3dm);
+            // Parse B3DM in-place (no long-lived helper object) to reduce temporary allocations
+            string featureTableJson = null;
+            byte[] featureTableBinary = null;
+            string batchTableJson = null;
+            byte[] batchTableBinary = null;
+            byte[] glbData = null;
 
-            RemoveCesiumRtcFromRequieredExtentions(ref b3dm);
+            var memoryStream = new System.IO.MemoryStream(contentBytes, writable: false);
+            try
+            {
+                using (var reader = new System.IO.BinaryReader(memoryStream, Encoding.UTF8, leaveOpen: true))
+                {
+                    // Read header
+                    var magic = Encoding.UTF8.GetString(reader.ReadBytes(4));
+                    var version = reader.ReadUInt32();
+                    var fileLength = (int)reader.ReadUInt32();
+
+                    int featureTableJsonLength = (int)reader.ReadUInt32();
+                    int featureTableBinaryLength = (int)reader.ReadUInt32();
+                    int batchTableJsonLength = (int)reader.ReadUInt32();
+                    int batchTableBinaryLength = (int)reader.ReadUInt32();
+
+                    // Read feature table
+                    if (featureTableJsonLength > 0)
+                        featureTableJson = Encoding.UTF8.GetString(reader.ReadBytes(featureTableJsonLength));
+                    else
+                        featureTableJson = null;
+                    if (featureTableBinaryLength > 0)
+                        featureTableBinary = reader.ReadBytes(featureTableBinaryLength);
+
+                    // Read batch table
+                    if (batchTableJsonLength > 0)
+                        batchTableJson = Encoding.UTF8.GetString(reader.ReadBytes(batchTableJsonLength));
+                    if (batchTableBinaryLength > 0)
+                        batchTableBinary = reader.ReadBytes(batchTableBinaryLength);
+
+                    // Read GLB header (12 bytes) and total GLB length
+                    var remaining = fileLength - (28 + featureTableJsonLength + featureTableBinaryLength + batchTableJsonLength + batchTableBinaryLength);
+                    if (remaining < 12)
+                    {
+                        throw new System.IO.EndOfStreamException("B3DM GLB segment too small to contain header");
+                    }
+
+                    byte[] glbHeader = reader.ReadBytes(12);
+                    if (glbHeader.Length != 12) throw new System.IO.EndOfStreamException("Failed to read GLB header from B3DM");
+
+                    int totalGlbLength = glbHeader[11] * 256;
+                    totalGlbLength = (totalGlbLength + glbHeader[10]) * 256;
+                    totalGlbLength = (totalGlbLength + glbHeader[9]) * 256;
+                    totalGlbLength = totalGlbLength + glbHeader[8];
+
+                    if (totalGlbLength < 12) throw new System.IO.InvalidDataException($"Invalid GLB length {totalGlbLength}");
+
+                    glbData = new byte[totalGlbLength];
+                    System.Buffer.BlockCopy(glbHeader, 0, glbData, 0, 12);
+                    int bytesToRead = totalGlbLength - 12;
+                    int read = reader.Read(glbData, 12, bytesToRead);
+                    if (read != bytesToRead) throw new System.IO.EndOfStreamException($"Expected {bytesToRead} GLB bytes, got {read}");
+                }
+            }
+            finally
+            {
+                // Dispose memoryStream but keep glbData and other locals
+                memoryStream.Dispose();
+                memoryStream = null;
+                contentBytes = null;
+            }
+
+            double[] rtcCenter = GetRTCCenterFromFeatureTableJson(featureTableJson);
+
+            // If no RTC center in featureTable, look in GLB JSON
             if (rtcCenter == null)
             {
-                rtcCenter = GetRTCCenterFromGlb(b3dm.GlbData); // Reuse existing method
+                rtcCenter = GetRTCCenterFromGlb(glbData);
             }
+
+            // Optionally remove CESIUM_RTC from GLB JSON
+            RemoveCesiumRtcFromRequieredExtentions(ref glbData);
             
             var success = true;
             Uri uri = null;
@@ -520,7 +584,7 @@ namespace Netherlands3D.Tiles3D
             bool disposeImport = disposeGltfImportAfterSpawn;
             try
             {
-                success = await import.Load(b3dm.GlbData, uri, GetImportSettings());
+                success = await import.Load(glbData, uri, GetImportSettings());
 
                 if (!IsAlive())
                 {
@@ -538,7 +602,7 @@ namespace Netherlands3D.Tiles3D
 
                 var finalized = await FinalizeAfterSuccessfulLoadAsync(import, rtcCenter, sourceUri
 #if SUBOBJECT
-                    , b3dm.GlbData
+                    , glbData
 #endif
                 );
 
@@ -558,6 +622,12 @@ namespace Netherlands3D.Tiles3D
             finally
             {
                 ReturnImport(import, disposeImport);
+                // Clear local buffers so GC can reclaim memory
+                glbData = null;
+                featureTableBinary = null;
+                batchTableBinary = null;
+                featureTableJson = null;
+                batchTableJson = null;
             }
         }
 
@@ -885,19 +955,13 @@ namespace Netherlands3D.Tiles3D
         /// <summary>
         /// Extract RTC center from B3DM feature table
         /// </summary>
-        private static double[] GetRTCCenterFromB3dm(B3dm b3dm)
+        private static double[] GetRTCCenterFromFeatureTableJson(string featureTableJson)
         {
-            string batchttableJSONstring = b3dm.FeatureTableJson;
-            JSONNode root = JSON.Parse(batchttableJSONstring);
+            if (string.IsNullOrEmpty(featureTableJson)) return null;
+            JSONNode root = JSON.Parse(featureTableJson);
             JSONNode centernode = root["RTC_CENTER"];
-            if (centernode == null)
-            {
-                return null;
-            }
-            if (centernode.Count != 3)
-            {
-                return null;
-            }
+            if (centernode == null) return null;
+            if (centernode.Count != 3) return null;
             double[] result = new double[3];
             result[0] = centernode[0].AsDouble;
             result[1] = centernode[1].AsDouble;
@@ -961,61 +1025,8 @@ namespace Netherlands3D.Tiles3D
             }
         }
 
-        /// <summary>
-        /// Remove Cesium RTC from required extensions in B3DM
-        /// </summary>
-        private static void RemoveCesiumRtcFromRequieredExtentions(ref B3dm b3dm)
-        {
-            int jsonstart = 20;
-            int jsonlength = (b3dm.GlbData[15]) * 256;
-            jsonlength = (jsonlength + b3dm.GlbData[14]) * 256;
-            jsonlength = (jsonlength + b3dm.GlbData[13]) * 256;
-            jsonlength = (jsonlength + b3dm.GlbData[12]);
-
-            string jsonstring = Encoding.UTF8.GetString(b3dm.GlbData, jsonstart, jsonlength);
-
-            JSONNode gltfJSON = JSON.Parse(jsonstring);
-            JSONNode extensionsRequiredNode = gltfJSON["extensionsRequired"];
-            if (extensionsRequiredNode == null)
-            {
-                return;
-            }
-            int extensionsRequiredCount = extensionsRequiredNode.Count;
-            int cesiumRTCIndex = -1;
-            for (int ii = 0; ii < extensionsRequiredCount; ii++)
-            {
-                if (extensionsRequiredNode[ii].Value == "CESIUM_RTC")
-                {
-                    cesiumRTCIndex = ii;
-                }
-            }
-            if (cesiumRTCIndex < 0)
-            {
-                return;
-            }
-
-            if (extensionsRequiredCount == 1)
-            {
-                gltfJSON.Remove(extensionsRequiredNode);
-            }
-            else
-            {
-                extensionsRequiredNode.Remove(cesiumRTCIndex);
-            }
-            jsonstring = gltfJSON.ToString();
-
-            byte[] resultbytes = Encoding.UTF8.GetBytes(jsonstring);
-
-            int i = 0;
-            for (i = 0; i < resultbytes.Length; i++)
-            {
-                b3dm.GlbData[jsonstart + i] = resultbytes[i];
-            }
-            for (int j = i; j < jsonlength; j++)
-            {
-                b3dm.GlbData[jsonstart + j] = 0x20;
-            }
-        }
+        // B3dm-specific overload removed. In-place GLB JSON patching should use
+        // the byte[] overload above: RemoveCesiumRtcFromRequieredExtentions(ref byte[] GlbData)
 
         #endregion
 
