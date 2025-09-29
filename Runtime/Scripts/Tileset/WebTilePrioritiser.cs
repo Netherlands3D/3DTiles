@@ -58,6 +58,15 @@ namespace Netherlands3D.Tiles3D
         private List<Tile> prioritisedTiles = new List<Tile>();
         public List<Tile> PrioritisedTiles { get => prioritisedTiles; private set => prioritisedTiles = value; }
 
+        private readonly Dictionary<Tile, TilePriorityInfo> tilePriorityInfos = new();
+
+        private struct TilePriorityInfo
+        {
+            public float Distance;
+            public float ScreenSpaceError;
+            public float Score;
+        }
+
         private bool requirePriorityCheck = false;
         public bool showPriorityNumbers = false;
 
@@ -161,6 +170,14 @@ namespace Netherlands3D.Tiles3D
                 // Base score from SSE once (avoid double counting)
                 float score = sse * screenSpaceErrorScoreMultiplier;
 
+                float distanceToCamera = float.MaxValue;
+                if (currentCamera != null)
+                {
+                    var camPos = currentCamera.transform.position;
+                    var closestPoint = tile.ContentBounds.ClosestPoint(camPos);
+                    distanceToCamera = Vector3.Distance(camPos, closestPoint);
+                }
+
                 // Center-first multiplier
                 if (useCenterOutwardPriority)
                 {
@@ -185,10 +202,51 @@ namespace Netherlands3D.Tiles3D
                 }
 
                 tile.priority = (int)score;
+
+                tilePriorityInfos[tile] = new TilePriorityInfo
+                {
+                    Distance = distanceToCamera,
+                    ScreenSpaceError = sse,
+                    Score = score
+                };
             }
 
-            PrioritisedTiles.Sort((obj1, obj2) => obj2.priority.CompareTo(obj1.priority));
+            if (tilePriorityInfos.Count > PrioritisedTiles.Count)
+            {
+                var currentSet = new HashSet<Tile>(PrioritisedTiles);
+                var staleKeys = tilePriorityInfos.Keys.Where(tile => !currentSet.Contains(tile)).ToList();
+                foreach (var stale in staleKeys)
+                {
+                    tilePriorityInfos.Remove(stale);
+                }
+            }
+
+            PrioritisedTiles.Sort(PriorityComparer);
             Apply();
+        }
+
+        private int PriorityComparer(Tile a, Tile b)
+        {
+            var hasA = tilePriorityInfos.TryGetValue(a, out var infoA);
+            var hasB = tilePriorityInfos.TryGetValue(b, out var infoB);
+
+            if (!hasA && !hasB) return 0;
+            if (!hasA) return 1;
+            if (!hasB) return -1;
+
+            int distanceComparison = infoA.Distance.CompareTo(infoB.Distance);
+            if (distanceComparison != 0)
+            {
+                return distanceComparison;
+            }
+
+            int sseComparison = infoB.ScreenSpaceError.CompareTo(infoA.ScreenSpaceError);
+            if (sseComparison != 0)
+            {
+                return sseComparison;
+            }
+
+            return infoB.Score.CompareTo(infoA.Score);
         }
 
         /// <summary>
