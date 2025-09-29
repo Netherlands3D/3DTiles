@@ -155,17 +155,6 @@ namespace Netherlands3D.Tiles3D
         }
 
         /// <summary>
-        /// Check if tile is in view frustum
-        /// </summary>
-        public static bool IsInViewFrustum(Tile tile, Camera camera)
-        {
-            if (camera == null) return false;
-            
-            var planes = GeometryUtility.CalculateFrustumPlanes(camera);
-            return GeometryUtility.TestPlanesAABB(planes, tile.ContentBounds);
-        }
-
-        /// <summary>
         /// Check if tile is critical for navigation (has .json/.subtree or loading children)
         /// </summary>
         public static bool IsCriticalForNavigation(Tile tile)
@@ -177,50 +166,6 @@ namespace Netherlands3D.Tiles3D
                 
             // Tiles with loading children are critical
             return CountLoadingChildren(tile) > 0;
-        }
-
-        /// <summary>
-        /// Check if tile should be kept for display purposes
-        /// </summary>
-        public static bool ShouldKeepForDisplay(Tile tile)
-        {
-            // Always keep if critical for navigation
-            if (IsCriticalForNavigation(tile))
-                return true;
-                
-            // Keep tiles with loaded content that might still be needed
-            if (tile.content?.State == Content.ContentLoadState.DOWNLOADED)
-            {
-                // If we have loaded children, we can be replaced
-                return CountLoadedChildren(tile) == 0;
-            }
-                
-            return false;
-        }
-
-        /// <summary>
-        /// Calculate screen space error for a tile
-        /// </summary>
-        public static float CalculateScreenSpaceError(Tile tile, Camera camera, Vector3 closestPointOnBounds)
-        {
-            if (camera == null) return float.MaxValue;
-
-            float sse;
-            if (camera.orthographic)
-            {
-                Bounds bounds = tile.ContentBounds;
-                float maxBoundsSize = Mathf.Max(bounds.size.x, bounds.size.y, bounds.size.z);
-                sse = maxBoundsSize / camera.orthographicSize;
-            }
-            else
-            {
-                float distance = Vector3.Distance(closestPointOnBounds, camera.transform.position);
-                if (distance <= 0) distance = 0.1f;
-                
-                sse = (float)(tile.geometricError / distance);
-            }
-            
-            return sse;
         }
 
         /// <summary>
@@ -464,7 +409,7 @@ namespace Netherlands3D.Tiles3D
         /// <param name="tile">The tile to check</param>
         /// <param name="camera">The camera to check against</param>
         /// <returns>True if tile is in view</returns>
-        public static bool IsInViewFrustrum(Tile tile, Camera camera)
+        public static bool IsInViewFrustum(Tile tile, Camera camera)
         {
             if (!tile.boundsAvailable && tile.boundsAreValid)
             {

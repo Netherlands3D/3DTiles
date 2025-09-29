@@ -256,7 +256,7 @@ namespace Netherlands3D.Tiles3D
         {
             var cam = currentCamera != null ? currentCamera : Camera.main;
             if (cam == null) return true; // don’t over-penalise if no camera
-            return tile.IsInViewFrustrum(cam);
+            return tile.IsInViewFrustum(cam);
         }
 
         private float CenterWeight(Vector3 position)

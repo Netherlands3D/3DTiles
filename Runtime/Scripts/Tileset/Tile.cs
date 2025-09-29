@@ -74,7 +74,7 @@ namespace Netherlands3D.Tiles3D
 
         public int GetNestingDepth => TileHelper.GetNestingDepth(this);
 
-        public bool IsInViewFrustrum(Camera ofCamera) => TileHelper.IsInViewFrustrum(this, ofCamera);
+    public bool IsInViewFrustum(Camera ofCamera) => TileHelper.IsInViewFrustum(this, ofCamera);
 
         public void CalculateUnitBounds() => TileHelper.CalculateUnitBounds(this);
 

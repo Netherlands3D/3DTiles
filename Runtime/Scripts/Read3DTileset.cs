@@ -657,7 +657,7 @@ namespace Netherlands3D.Tiles3D
             for (int i = visibleTiles.Count - 1; i >= 0; i--)
             {
                 var tile = visibleTiles[i];
-                var tileIsInView = tile.IsInViewFrustrum(currentCamera);
+                var tileIsInView = tile.IsInViewFrustum(currentCamera);
                 if (!tileIsInView)
                 {
                     tilePrioritiser.DisposeImmediately(tile, true);
@@ -742,7 +742,7 @@ namespace Netherlands3D.Tiles3D
 
         private void LoadInViewRecursively(Tile tile, Camera currentCamera)
         {
-            var tileIsInView = tile.IsInViewFrustrum(currentCamera);
+            var tileIsInView = tile.IsInViewFrustum(currentCamera);
             if (!tileIsInView)
             {
                 return;
