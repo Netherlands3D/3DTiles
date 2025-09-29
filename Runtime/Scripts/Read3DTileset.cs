@@ -55,16 +55,8 @@ namespace Netherlands3D.Tiles3D
         [Tooltip("Limits amount of detail higher resolution would cause to load.")]
         public int maxScreenHeightInPixels = 1080;
         public int maximumScreenSpaceError = 5;
-    // [Header("Refinement tuning")]
-    // [Tooltip("Multiplier to control preference for coarser tiles. >1 => prefer larger (coarser) tiles earlier; <1 => prefer more detail sooner.")]
-    // [Range(0.25f, 4f)]
-    private float coarsenessFactor = 3.0f;
-
         [SerializeField] private float sseComponent = -1;
         private List<Tile> visibleTiles = new List<Tile>();
-        
-        // Reusable collections to prevent heap allocations during tile management
-        private List<Tile> reusableTilesToRemove = new List<Tile>();
 
         [SerializeField] private WebTilePrioritiser tilePrioritiser;
         private bool usingPrioritiser = true;
@@ -591,55 +583,6 @@ namespace Netherlands3D.Tiles3D
         }
 
         /// <summary>
-        /// Remove child tiles from visible list when a parent tile with enough detail is loaded
-        /// This prevents overdraw and reduces memory usage
-        /// </summary>
-        /// <param name="parentTile">The parent tile that was just loaded</param>
-        private void RemoveChildTilesFromVisible(Tile parentTile)
-        {
-            if (parentTile.ChildrenCount == 0)
-                return;
-
-            // Clear and reuse list to avoid per-tile heap allocations
-            reusableTilesToRemove.Clear();
-            foreach (var visibleTile in visibleTiles)
-            {
-                if (IsChildOfTile(visibleTile, parentTile))
-                {
-                    reusableTilesToRemove.Add(visibleTile);
-                }
-            }
-
-            // Then remove them
-            foreach (var tileToRemove in reusableTilesToRemove)
-            {
-                tilePrioritiser.DisposeImmediately(tileToRemove, true);
-                visibleTiles.Remove(tileToRemove);
-            }
-        }
-
-        /// <summary>
-        /// Check if a tile is a child (direct or indirect) of another tile
-        /// </summary>
-        /// <param name="potentialChild">The tile to check if it's a child</param>
-        /// <param name="potentialParent">The tile to check if it's a parent</param>
-        /// <returns>True if potentialChild is a child of potentialParent</returns>
-        private bool IsChildOfTile(Tile potentialChild, Tile potentialParent)
-        {
-            if (potentialChild == null || potentialParent == null)
-                return false;
-
-            Tile currentParent = potentialChild.parent;
-            while (currentParent != null)
-            {
-                if (currentParent == potentialParent)
-                    return true;
-                currentParent = currentParent.parent;
-            }
-            return false;
-        }
-
-        /// <summary>
         /// Check for tiles in our visibile tiles list that moved out of the view / max distance.
         /// Request dispose for tiles that moved out of view
         /// </summary>
@@ -777,9 +720,7 @@ namespace Netherlands3D.Tiles3D
 
             var closestPointOnBounds = tile.ContentBounds.ClosestPoint(currentCamera.transform.position); //Returns original point when inside the bounds
             CalculateTileScreenSpaceError(tile, currentCamera, closestPointOnBounds);
-            // Apply coarseness factor: values >1 favor larger (coarser) tiles earlier
-            var adjustedMaximumSSE = maximumScreenSpaceError * Mathf.Clamp(coarsenessFactor, 0.01f, 100f);
-            var enoughDetail = tile.screenSpaceError < adjustedMaximumSSE;
+            var enoughDetail = tile.screenSpaceError < maximumScreenSpaceError;
             var Has3DContent = tile.contentUri.Length > 0 && !tile.contentUri.Contains(".json") && !tile.contentUri.Contains(".subtree");
             if (enoughDetail == false)  
             {
@@ -819,8 +760,6 @@ namespace Netherlands3D.Tiles3D
                             {
                                 RequestContentUpdate(tile);
                                 visibleTiles.Add(tile);
-                                // When we load a parent tile with enough detail, remove child tiles to avoid overdraw
-                                RemoveChildTilesFromVisible(tile);
                             }
                         //}
                     }
