@@ -29,8 +29,6 @@ namespace Netherlands3D.Tiles3D
         public bool makeMeshesNoLongerReadable = true;
         [Tooltip("Attempt to make textures non-readable to release CPU-side texture data.")]
         public bool makeTexturesNoLongerReadable = true;
-        [Tooltip("Dispose the GltfImport after instantiation to free parser buffers (keep spawned objects).")]
-        public bool disposeGltfImportAfterSpawn = false;
         [Tooltip("Call Resources.UnloadUnusedAssets (and optional GC.Collect) after spawning a tile.")]
         public bool unloadUnusedAssetsAfterSpawn = false;
         [Tooltip("When unloading unused assets, also force a GC.Collect (can stall; use sparingly).")]
@@ -581,7 +579,7 @@ namespace Netherlands3D.Tiles3D
             }
     
             var import = await GltfImportPool.Acquire();
-            bool disposeImport = disposeGltfImportAfterSpawn;
+            bool disposeImport = false;
             try
             {
                 success = await import.Load(glbData, uri, GetImportSettings());
@@ -666,7 +664,7 @@ namespace Netherlands3D.Tiles3D
             double[] rtcCenter = GetRTCCenterFromGlb(contentBytes);
 
             var import = await GltfImportPool.Acquire();
-            bool disposeImport = disposeGltfImportAfterSpawn;
+            bool disposeImport = false;
             try
             {
                 success = await import.Load(contentBytes, uri, GetImportSettings());
@@ -729,7 +727,7 @@ namespace Netherlands3D.Tiles3D
             }
     
             var import = await GltfImportPool.Acquire();
-            bool disposeImport = disposeGltfImportAfterSpawn;
+            bool disposeImport = false;
             try
             {
                 success = await import.Load(uri);

@@ -41,7 +41,6 @@ namespace Netherlands3D.Tiles3D
 
         [Header("Tileset")]
         public Tile root;
-        public double[] transformValues;
 
         TilingMethod tilingMethod = TilingMethod.ExplicitTiling;
 
@@ -62,8 +61,6 @@ namespace Netherlands3D.Tiles3D
         private bool usingPrioritiser = true;
 
         private Camera currentCamera;
-        private Vector3 currentCameraPosition;
-        private Quaternion currentCameraRotation;
 
         internal string tilesetFilename = "tileset.json";
 
@@ -565,9 +562,6 @@ namespace Netherlands3D.Tiles3D
             yield return new WaitUntil(() => root != null);
             while (true)
             {
-                //If camera changed, recalculate what tiles are be in view
-                currentCamera.transform.GetPositionAndRotation(out currentCameraPosition, out currentCameraRotation);
-
                 SetSSEComponent(currentCamera);
                 DisposeTilesOutsideView(currentCamera);
                 if (root.ChildrenCount > 0)
@@ -752,16 +746,11 @@ namespace Netherlands3D.Tiles3D
             {
                     if (Has3DContent)
                     {
-                        int loadingParentsCount = tile.CountLoadingParents;
-                        int loadedParentsCount = tile.CountLoadedParents;
-                        //if (loadedParentsCount + loadingParentsCount < 2)
-                        //{
                             if (!visibleTiles.Contains(tile))
                             {
                                 RequestContentUpdate(tile);
                                 visibleTiles.Add(tile);
                             }
-                        //}
                     }
             }
 
