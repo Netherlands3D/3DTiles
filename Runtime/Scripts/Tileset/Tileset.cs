@@ -134,7 +134,8 @@ namespace Netherlands3D.Tiles3D
     public class Tileset
     {
 
-        DownloadHelper downloadHelper;
+    // No external helper needed: Tileset performs its own download using
+    // UnityWebRequest and the AsyncOperation.completed callback.
 
         public string tilesetUrl;
         public Version version = Version.unsupported;
@@ -147,25 +148,48 @@ namespace Netherlands3D.Tiles3D
         
         
 
-        public Tileset(string tileseturl, DownloadHelper downloadHelper=null)
+        public Tileset(string tileseturl)
         {
-            this.downloadHelper = downloadHelper;
             tilesetUrl = tileseturl;
-            getDownloadHelper();
-            downloadHelper.downloadData(tileseturl, receiveTileset);
+            StartTilesetDownload(tileseturl, receiveTileset);
         }
-        private void getDownloadHelper()
+
+        // Start an asynchronous tileset download. We avoid coroutines here so
+        // `Tileset` doesn't need to be a MonoBehaviour: UnityWebRequest.SendWebRequest()
+        // returns an AsyncOperation we can hook into via its completed callback.
+        private void StartTilesetDownload(string url, System.Action<byte[]> callback)
         {
-            if (downloadHelper == null)
+            var www = UnityWebRequest.Get(url);
+            // Optionally set timeout or headers here if needed
+            var op = www.SendWebRequest();
+            op.completed += _ =>
             {
-                downloadHelper = GameObject.FindAnyObjectByType<DownloadHelper>();
-                if (downloadHelper == null)
+                try
                 {
-                    GameObject go = new GameObject("TilesetDownloadHelper");
-                    downloadHelper = go.AddComponent<DownloadHelper>();
+                    if (www.result != UnityWebRequest.Result.Success)
+                    {
+                        Debug.LogError($"Could not load tileset from url:{url} Error:{www.error}");
+                        callback?.Invoke(null);
+                        return;
+                    }
+
+                    byte[] data = null;
+                    try
+                    {
+                        data = www.downloadHandler?.data;
+                    }
+                    catch
+                    {
+                        data = null;
+                    }
+
+                    callback?.Invoke(data);
                 }
-                
-            }
+                finally
+                {
+                    www.Dispose();
+                }
+            };
         }
 
         private void receiveTileset(byte[] data)
