@@ -57,8 +57,19 @@ namespace Netherlands3D.Tiles3D
         [SerializeField] private float sseComponent = -1;
         private List<Tile> visibleTiles = new List<Tile>();
 
-        [SerializeField] private WebTilePrioritiser tilePrioritiser;
-        private bool usingPrioritiser = true;
+        [SerializeField] private int maxSimultaneousDownloads = 6;
+        [SerializeField] private float distancePriorityWeight = 1.0f;
+
+        private readonly List<Tile> downloadQueue = new();
+        private readonly HashSet<Tile> queuedTiles = new();
+        private readonly Dictionary<Tile, PriorityData> priorityData = new();
+
+        private struct PriorityData
+        {
+            public float Distance;
+            public float Score;
+            public float ScreenSpaceError;
+        }
 
         private Camera currentCamera;
 
@@ -140,6 +151,9 @@ namespace Netherlands3D.Tiles3D
             DisposeAllTilesRecursive(root);
             root = null;
             visibleTiles = new();
+            downloadQueue.Clear();
+            queuedTiles.Clear();
+            priorityData.Clear();
 
             InitializeURLAndLoadTileSet();
         }
@@ -173,7 +187,26 @@ namespace Netherlands3D.Tiles3D
                 }
             }
 
-            tilePrioritiser.DisposeImmediately(tile, true);
+            DisposeTile(tile, true);
+        }
+
+        private void DisposeTile(Tile tile, bool forceDispose = true)
+        {
+            if (tile == null)
+            {
+                return;
+            }
+
+            queuedTiles.Remove(tile);
+            downloadQueue.Remove(tile);
+
+            tile.requestedDispose = false;
+            tile.requestedUpdate = false;
+
+            if (forceDispose)
+            {
+                tile.Dispose();
+            }
         }
 
         void InitializeURLAndLoadTileSet()
@@ -182,11 +215,6 @@ namespace Netherlands3D.Tiles3D
 
             currentCamera = Camera.main;
             StartCoroutine(LoadInView());
-
-            if (usingPrioritiser)
-            {
-                tilePrioritiser.SetCamera(currentCamera);
-            }
 
             ExtractDatasetPaths();
 
@@ -276,25 +304,13 @@ namespace Netherlands3D.Tiles3D
         /// </summary>
         /// <param name="tilesetUrl">The url pointing to tileset; https://.../tileset.json</param>
         /// <param name="maximumScreenSpaceError">The maximum screen space error for this tileset (default=5)</param>
-        /// <param name="tilePrioritiser">Optional tile prioritisation system</param>
-        public void Initialize(string tilesetUrl,CoordinateSystem contentCoordinateystem = CoordinateSystem.WGS84_ECEF, int maximumScreenSpaceError = 5, WebTilePrioritiser tilePrioritiser = null)
+        public void Initialize(string tilesetUrl,CoordinateSystem contentCoordinateystem = CoordinateSystem.WGS84_ECEF, int maximumScreenSpaceError = 5)
         {
             currentCamera = Camera.main;
             this.tilesetUrl = tilesetUrl;
             this.maximumScreenSpaceError = maximumScreenSpaceError;
             this.contentCoordinateSystem = contentCoordinateystem;
-            SetTilePrioritiser(tilePrioritiser);
             RefreshTiles();
-        }
-
-        /// <summary>
-        /// Optional injection of tile prioritiser system
-        /// </summary>
-        /// <param name="tilePrioritiser">Prioritising system with WebTilePrioritiser class. Set to null to disable.</param>
-        public void SetTilePrioritiser(WebTilePrioritiser tilePrioritiser)
-        {
-            this.tilePrioritiser = tilePrioritiser;
-            usingPrioritiser = (tilePrioritiser);
         }
 
         public void RecalculateBounds()
@@ -538,20 +554,174 @@ namespace Netherlands3D.Tiles3D
                 tile.content.contentcoordinateSystem = contentCoordinateSystem;
 #endif
 
-                //Request tile content update via optional prioritiser, or load directly
-                if (usingPrioritiser)
-                {
-                    if (!tile.requestedUpdate)
-                        tilePrioritiser.AddToLoadQueue(tile);
-                }
-                else
-                {
-                    tile.content.Load(materialOverride);
-                }
+                EnqueueTileForLoad(tile);
             }
             // Log de diepte en contentUri
             int depth = GetTileDepth(tile);
             Debug.Log($"Tile loaded: depth={depth}, contentUri={tile.contentUri}");
+        }
+
+        private void EnqueueTileForLoad(Tile tile)
+        {
+            if (tile == null)
+            {
+                return;
+            }
+
+            var content = tile.content;
+            if (content == null)
+            {
+                return;
+            }
+
+            if (content.State != Content.ContentLoadState.NOTLOADING)
+            {
+                return;
+            }
+
+            if (queuedTiles.Add(tile))
+            {
+                downloadQueue.Add(tile);
+                tile.requestedUpdate = true;
+            }
+        }
+
+        private void ProcessDownloadQueue(Camera camera)
+        {
+            if (downloadQueue.Count == 0)
+            {
+                return;
+            }
+
+            priorityData.Clear();
+
+            bool hasCamera = camera != null;
+            Vector3 cameraPosition = hasCamera ? camera.transform.position : Vector3.zero;
+
+            for (int i = downloadQueue.Count - 1; i >= 0; i--)
+            {
+                var tile = downloadQueue[i];
+                if (tile == null || tile.content == null)
+                {
+                    queuedTiles.Remove(tile);
+                    downloadQueue.RemoveAt(i);
+                    continue;
+                }
+
+                var content = tile.content;
+                if (content.State == Content.ContentLoadState.DOWNLOADED || content.State == Content.ContentLoadState.DOWNLOADING)
+                {
+                    queuedTiles.Remove(tile);
+                    downloadQueue.RemoveAt(i);
+                    continue;
+                }
+
+                float sse = Mathf.Max(0f, tile.screenSpaceError);
+                float score = sse;
+
+                float distance = float.MaxValue;
+                if (hasCamera)
+                {
+                    distance = Vector3.Distance(cameraPosition, tile.ContentBounds.ClosestPoint(cameraPosition));
+                    if (!float.IsInfinity(distance) && !float.IsNaN(distance))
+                    {
+                        float distanceWeight = distancePriorityWeight / Mathf.Max(distance, 0.1f);
+                        score *= Mathf.Max(0.01f, distanceWeight);
+                    }
+                    else
+                    {
+                        distance = float.MaxValue;
+                    }
+                }
+
+                priorityData[tile] = new PriorityData
+                {
+                    Distance = distance,
+                    Score = score,
+                    ScreenSpaceError = sse
+                };
+
+                tile.priority = Mathf.RoundToInt(score);
+            }
+
+            if (priorityData.Count == 0)
+            {
+                downloadQueue.Clear();
+                return;
+            }
+
+            downloadQueue.Sort((a, b) =>
+            {
+                var infoA = priorityData[a];
+                var infoB = priorityData[b];
+
+                int distanceComparison = infoA.Distance.CompareTo(infoB.Distance);
+                if (distanceComparison != 0)
+                {
+                    return distanceComparison;
+                }
+
+                int scoreComparison = infoB.Score.CompareTo(infoA.Score);
+                if (scoreComparison != 0)
+                {
+                    return scoreComparison;
+                }
+
+                return infoB.ScreenSpaceError.CompareTo(infoA.ScreenSpaceError);
+            });
+
+            int activeDownloads = CountActiveDownloads();
+            while (downloadQueue.Count > 0 && activeDownloads < maxSimultaneousDownloads)
+            {
+                var tile = downloadQueue[0];
+                downloadQueue.RemoveAt(0);
+                queuedTiles.Remove(tile);
+                priorityData.Remove(tile);
+
+                var content = tile.content;
+                if (content == null || content.State != Content.ContentLoadState.NOTLOADING)
+                {
+                    continue;
+                }
+
+                StartTileDownload(tile);
+                activeDownloads++;
+            }
+        }
+
+
+        private void StartTileDownload(Tile tile)
+        {
+            var content = tile.content;
+            if (content == null)
+            {
+                return;
+            }
+
+            UnityEngine.Events.UnityAction onCompleted = null;
+            onCompleted = () =>
+            {
+                content.onDoneDownloading.RemoveListener(onCompleted);
+                tile.requestedUpdate = false;
+            };
+
+            content.onDoneDownloading.AddListener(onCompleted);
+            content.Load(materialOverride);
+        }
+
+        private int CountActiveDownloads()
+        {
+            int count = 0;
+            for (int i = 0; i < visibleTiles.Count; i++)
+            {
+                var tile = visibleTiles[i];
+                if (tile?.content != null && tile.content.State == Content.ContentLoadState.DOWNLOADING)
+                {
+                    count++;
+                }
+            }
+
+            return count;
         }
 
         /// <summary>
@@ -571,6 +741,8 @@ namespace Netherlands3D.Tiles3D
                         LoadInViewRecursively(child, currentCamera);
                     }
                 }
+
+                ProcessDownloadQueue(currentCamera);
 
                 yield return null;
             }
@@ -597,7 +769,7 @@ namespace Netherlands3D.Tiles3D
                 var tileIsInView = tile.IsInViewFrustum(currentCamera);
                 if (!tileIsInView)
                 {
-                    tilePrioritiser.DisposeImmediately(tile, true);
+                    DisposeTile(tile, true);
                     visibleTiles.RemoveAt(i);
                     continue;
                 }
@@ -611,7 +783,7 @@ namespace Netherlands3D.Tiles3D
                         // can be removed if a parentTile is loaded
                         if (tile.parent.CountLoadedParents > 0)
                         {
-                            tilePrioritiser.DisposeImmediately(tile, true);
+                            DisposeTile(tile, true);
                             visibleTiles.RemoveAt(i);
                             continue;
                         }
@@ -630,7 +802,7 @@ namespace Netherlands3D.Tiles3D
                     {
                         if (tile.CountLoadedChildren > 0)
                         {
-                            tilePrioritiser.DisposeImmediately(tile);
+                            DisposeTile(tile);
 
                             visibleTiles.RemoveAt(i);
                         }
@@ -814,14 +986,14 @@ namespace Netherlands3D.Tiles3D
             NameValueCollection contentQueryParameters = ParseQueryString(uriBuilder.Query);
             foreach (string key in queryParameters.Keys)
             {
-                if (!contentQueryParameters.AllKeys.Contains(key))
+                if (!contentQueryParameters.AllKeys.Any(k => k == key))
                 {
                     contentQueryParameters.Add(key, queryParameters[key]);
                 }
             }
             foreach (string key in contentQueryParameters.Keys)
             {
-                if (!queryParameters.AllKeys.Contains(key))
+                if (!queryParameters.AllKeys.Any(k => k == key))
                 {
                     queryParameters.Add(key, contentQueryParameters[key]);
                 }
@@ -867,7 +1039,6 @@ namespace Netherlands3D.Tiles3D
         /// </summary>
         public void SetSSEComponent(Camera currentCamera)
         {
-            if (usingPrioritiser) maxScreenHeightInPixels = tilePrioritiser.MaxScreenHeightInPixels;
 
             var screenHeight = (maxScreenHeightInPixels > 0) ? Mathf.Min(maxScreenHeightInPixels, Screen.height) : Screen.height;
 

@@ -55,7 +55,6 @@ namespace Netherlands3D.Tiles3D
 
         private void AddTileSets()
         {
-            var tilePrioritiser = GetComponent<WebTilePrioritiser>(); 
 
             foreach (var tileset in config.tilesets)
             {
@@ -63,7 +62,7 @@ namespace Netherlands3D.Tiles3D
                 newTileSet.transform.SetParent(this.transform);
 
                 var tileSetReader = newTileSet.AddComponent<Read3DTileset>();
-                tileSetReader.Initialize(tileset.url, (CoordinateSystem)tileset.contentCoordinateSystem, tileset.maximumScreenSpaceError, tilePrioritiser);
+                tileSetReader.Initialize(tileset.url, (CoordinateSystem)tileset.contentCoordinateSystem, tileset.maximumScreenSpaceError);
             }
         }
 
