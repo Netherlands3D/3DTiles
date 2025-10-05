@@ -12,8 +12,8 @@ see the SampleScene for how to set it up.
 
 ## Documentation
 
-
-
 For a conceptual overview of 3D Tiles, explicit & implicit tiling, quadtrees, and Morton index, see [3dtiles-introduction.md](Docs/3dtiles-introduction.md).
 
 For detailed information about the tile loading architecture and flow, see [tile_flow.md](Docs/tile_flow.md).
+
+For information about how the prefab system manages different tile layer types and components, see [prefab-system-architecture.md](Docs/prefab-system-architecture.md).

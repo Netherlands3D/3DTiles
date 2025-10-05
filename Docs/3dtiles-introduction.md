@@ -65,6 +65,147 @@ Implicit tiling is a technique in 3D Tiles that allows you to define a regular, 
 
 In summary: **Explicit tiling** is best for small or irregular datasets where you need full control over the hierarchy. **Implicit tiling** is ideal for massive, regular datasets (like terrain, photogrammetry, or city meshes) where a grid structure is sufficient and scalability is critical.
 
+
+# Understanding Geometric Error & SSE (Screen Space Error)
+
+Each tile has a **geometric error** — a value in meters that indicates how much detail this tile still visually represents well at a given viewing distance.
+
+With **implicit tiling**, these values usually follow fixed steps (e.g., halving per level), while with **explicit tiling** they can be freely set per tile in the `tileset.json`.
+
+You can think of it as:
+
+> "Up to approximately this distance, this tile still looks good enough; closer up you need more detail (the child tile)."
+
+The **Screen Space Error (SSE)** shows in pixels how much the tile deviates from reality on your screen. A higher SSE means the tile deviates too much from reality and more detail is needed. SSE is calculated using the formula:
+
+```
+                    geometricError × (viewportHeight/(2 × tan(fov/2)))
+            SSE = ───────────────────────────────────────────────────────
+                                        distance
+```
+
+where:
+- **geometricError** → value in meters; larger value means larger tile
+- **viewportHeight** → screen height in pixels  
+- **fov** → camera field of view
+- **distance** → distance from camera to the closest point of the tile's bounding volume
+
+### SSE Threshold
+
+In practice, the viewer or engine uses an SSE threshold (e.g., 16 pixels) to determine when a tile should be refined.
+
+**SSE > threshold** → tile gets refined (load more detail)
+
+**SSE ≤ threshold** → tile stays as it is
+
+This keeps the display visually consistent, without loading unnecessarily much detail.
+
+## What this means in practice (example with a large tile)
+
+| Situation | SSE | Action |
+|-----------|-----|---------|
+| Tile is close (small distance) | High | Tile looks too coarse → refine (load child tile with more detail) |
+| Tile is far away (large distance) | Low | Tile looks sharp enough → keep current tile |
+
+
+
+# Tile Refinement: REPLACE vs ADD
+
+3D Tiles supports two refinement strategies that control how parent and child tiles are rendered together:
+
+## REPLACE Refinement (Most Common)
+
+**How it works**: Child tiles **replace** their parent tile when loading higher detail.
+
+```json
+{
+  "refine": "REPLACE",
+  "geometricError": 100,
+  "children": [...]
+}
+```
+
+**Rendering behavior**:
+- When camera is far away: Show only parent tile
+- When camera gets closer: Hide parent, show child tiles instead
+- **Never show parent and children simultaneously**
+
+**Use cases**:
+- **Building models**: Parent shows simple box, children show detailed architecture
+- **Terrain**: Parent shows low-poly terrain, children show high-poly details
+- **Google Reality Mesh**: Uses REPLACE for progressive detail levels
+
+**Code impact** in `LoadInViewRecursively()`:
+```csharp
+if (enoughDetail || tile.ChildrenCount == 0) {
+    // Load this tile - we have enough detail OR it's a leaf
+} else {
+    // Not enough detail - traverse deeper to children
+    // Don't load parent tile for REPLACE refinement
+}
+```
+
+## ADD Refinement (Additive)
+
+**How it works**: Child tiles are **added on top of** their parent tile.
+
+```json
+{
+  "refine": "ADD", 
+  "geometricError": 100,
+  "children": [...]
+}
+```
+
+**Rendering behavior**:
+- Parent tile remains visible
+- Child tiles are rendered **in addition to** the parent
+- **Both parent and children are shown together**
+
+**Use cases**:
+- **Terrain with objects**: Parent shows terrain, children add trees/buildings on top
+- **Base layer + details**: Parent shows foundation, children add architectural details
+- **Layered datasets**: Different detail layers that complement each other
+
+**Code impact** in `LoadInViewRecursively()`:
+```csharp
+else {
+    // Not enough detail and we have children - traverse deeper first
+    foreach (var childTile in tile.children) {
+        LoadInViewRecursively(childTile, currentCamera);
+    }
+    
+    // Special case: if it's ADD refinement, also show parent alongside children
+    if (tile.refine == "ADD" && Has3DContent) {
+        RequestContentUpdate(tile); // Load parent too!
+    }
+}
+```
+
+## Visual Comparison
+
+**REPLACE Example**:
+```
+Camera far away:  [Parent Building]
+Camera closer:    [Detailed Wall 1] [Detailed Wall 2] [Detailed Roof]
+                  (Parent hidden)
+```
+
+**ADD Example**:
+```
+Camera far away:  [Terrain Base]
+Camera closer:    [Terrain Base] + [Tree 1] + [Tree 2] + [Building]
+                  (Parent remains visible)
+```
+
+## Performance Considerations
+
+- **REPLACE**: More memory efficient (only one level loaded at a time)
+- **ADD**: Higher memory usage (multiple levels loaded simultaneously)
+- **REPLACE**: Better for mobile/WebGL with memory constraints
+- **ADD**: Better for rich, layered scenes where context matters
+
+
 # Quadtree Structure
 A quadtree recursively subdivides a 2D area into four quadrants:
 
@@ -89,6 +230,7 @@ This allows fast lookup and traversal of tiles in memory or on disk.
 - [3D Tiles Specification](https://github.com/CesiumGS/3d-tiles/tree/main/specification)
 - [Implicit Tiling Spec](https://github.com/CesiumGS/3d-tiles/tree/main/specification/ImplicitTiling)
 - [Morton Code (Wikipedia)](https://en.wikipedia.org/wiki/Z-order_curve)
+- [Cesium Selection Algorithm Details](https://cesium.com/learn/cesium-native/ref-doc/selection-algorithm-details.html)
 
 ---
 

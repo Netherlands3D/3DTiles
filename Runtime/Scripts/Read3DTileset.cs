@@ -884,12 +884,39 @@ namespace Netherlands3D.Tiles3D
                 return;
             }
 
-            var closestPointOnBounds = tile.ContentBounds.ClosestPoint(currentCamera.transform.position); //Returns original point when inside the bounds
+            var closestPointOnBounds = tile.ContentBounds.ClosestPoint(currentCamera.transform.position);
             CalculateTileScreenSpaceError(tile, currentCamera, closestPointOnBounds);
             var enoughDetail = tile.screenSpaceError < maximumScreenSpaceError;
             var Has3DContent = tile.contentUri.Length > 0 && !tile.contentUri.Contains(".json") && !tile.contentUri.Contains(".subtree");
-            if (enoughDetail == false)  
+            
+            // Direct distance-based LOD selection strategy:
+            // 1. If we have enough detail OR no children, load this tile
+            // 2. If we don't have enough detail AND have children, traverse deeper first
+            
+            if (enoughDetail || tile.ChildrenCount == 0)  
             {
+                // Load this tile if it has content
+                if (Has3DContent)
+                {
+                    if (!visibleTiles.Contains(tile))
+                    {
+                        RequestContentUpdate(tile);
+                        visibleTiles.Add(tile);
+                    }
+                }
+            }
+            else
+            {
+                // Not enough detail and we have children - traverse deeper first
+                if (tile.ChildrenCount > 0)
+                {
+                    foreach (var childTile in tile.children)
+                    {
+                        LoadInViewRecursively(childTile, currentCamera);
+                    }
+                }
+                
+                // Only load this tile if it's ADD refinement (should show alongside children)
                 if (tile.refine == "ADD" && Has3DContent)
                 {
                     if (!visibleTiles.Contains(tile))
@@ -898,35 +925,7 @@ namespace Netherlands3D.Tiles3D
                         visibleTiles.Add(tile);
                     }
                 }
-                else if (tile.ChildrenCount == 0 && Has3DContent) //show the geometry if more detailed geometry is not available
-                {
-                    if (!visibleTiles.Contains(tile))
-                    {
-                        RequestContentUpdate(tile);
-                        visibleTiles.Add(tile);
-                    }
-                }
-                if (tile.ChildrenCount > 0)
-                {
-                    foreach (var childTile in tile.children)
-                    {
-                        LoadInViewRecursively(childTile, currentCamera);
-                    }
-                }
             }
-            else
-            {
-                    if (Has3DContent)
-                    {
-                            if (!visibleTiles.Contains(tile))
-                            {
-                                RequestContentUpdate(tile);
-                                visibleTiles.Add(tile);
-                            }
-                    }
-            }
-
-           
         }
 
         public void subtreeLoaded(Tile tile)
