@@ -22,21 +22,21 @@ namespace Netherlands3D.Tiles3D
         public string uri = "";
         public Coordinate contentCoordinate;
         public CoordinateSystem contentcoordinateSystem;
-        
-        // Memory tuning options
-        [Header("Memory Optimization")]
-        [Tooltip("Call UploadMeshData(true) on all spawned meshes to release CPU-side mesh data.")]
+
+        #region Memory tuning options
+        //Call UploadMeshData(true) on all spawned meshes to release CPU-side mesh data.")]
         public bool makeMeshesNoLongerReadable = true;
-        [Tooltip("Attempt to make textures non-readable to release CPU-side texture data.")]
+        //Attempt to make textures non-readable to release CPU-side texture data.")]
         public bool makeTexturesNoLongerReadable = true;
-        [Tooltip("Call Resources.UnloadUnusedAssets (and optional GC.Collect) after spawning a tile.")]
+        //Call Resources.UnloadUnusedAssets (and optional GC.Collect) after spawning a tile.")]
         public bool unloadUnusedAssetsAfterSpawn = false;
-        [Tooltip("When unloading unused assets, also force a GC.Collect (can stall; use sparingly).")]
+        //When unloading unused assets, also force a GC.Collect (can stall; use sparingly).")]
         public bool forceGCCollect = false;
-        [Tooltip("Clamp texture size after load. 0 disables downscaling.")]
+        //Clamp texture size after load. 0 disables downscaling.")]
         public int maxTextureSize = 2048;
-        [Tooltip("Set all textures to Bilinear and anisoLevel=1 to limit sampling cost.")]
+        //Set all textures to Bilinear and anisoLevel=1 to limit sampling cost.")]
         public bool simplifyTextureSampling = true;
+        #endregion
 
 #if SUBOBJECT
         public bool parseSubObjects = true;
@@ -53,10 +53,12 @@ namespace Netherlands3D.Tiles3D
 
         private UnityEngine.Material overrideMaterial;
         public static Action<Content> OnContentCreated;
-        [Header("Debug/Logging")]
-    [Tooltip("Always log URLs of b3dm/glb content being requested/processed")] 
-    [SerializeField] private bool logContentUrls = false;
-        
+
+        #region Debug/Logging
+        //Always log URLs of b3dm/glb content being requested/processed")] 
+        private bool logContentUrls = false;
+        #endregion
+
         // Cancellation token for async operations
         private System.Threading.CancellationTokenSource cancellationTokenSource;
         private Coroutine runningDownloadCoroutine;
@@ -66,31 +68,7 @@ namespace Netherlands3D.Tiles3D
             OnContentCreated?.Invoke(this);
         }
 
-        private void OnDestroy()
-        {
-            // Ensure parent tile releases its reference even if we get destroyed externally
-            if (parentTile != null && parentTile.content == this)
-            {
-                parentTile.content = null;
-            }
 
-            // Defensive: stop pending async work so no callbacks run on a destroyed component
-            if (cancellationTokenSource != null)
-            {
-                cancellationTokenSource.Cancel();
-                cancellationTokenSource.Dispose();
-                cancellationTokenSource = null;
-            }
-
-            if (runningDownloadCoroutine != null)
-            {
-                StopCoroutine(runningDownloadCoroutine);
-                runningDownloadCoroutine = null;
-            }
-
-            onDoneDownloading.RemoveAllListeners();
-            onTileLoadCompleted.RemoveAllListeners();
-        }
 
         Dictionary<string, string> headers = null;
         public enum ContentLoadState
@@ -175,14 +153,14 @@ namespace Netherlands3D.Tiles3D
                 // Step 1: Set loading state
                 State = ContentLoadState.DOWNLOADING;
                 parentTile.isLoading = true;
-                
+
                 // Create cancellation token for this loading operation
                 if (cancellationTokenSource == null)
                     cancellationTokenSource = new System.Threading.CancellationTokenSource();
 
                 // Step 2: Download content using coroutine
                 byte[] contentBytes = await DownloadContentCoroutineAsync(uri, headers);
-                
+
                 // Check if we're still valid after download
                 if (this == null || gameObject == null || cancellationTokenSource.Token.IsCancellationRequested)
                 {
@@ -199,7 +177,7 @@ namespace Netherlands3D.Tiles3D
                 // Step 3: Process content
                 State = ContentLoadState.PARSING;
                 bool success = await ProcessContentAsync(contentBytes, uri);
-                
+
                 // Step 4: Finish loading
                 FinishedLoading(success);
             }
@@ -252,7 +230,7 @@ namespace Netherlands3D.Tiles3D
                 StopCoroutine(runningDownloadCoroutine);
                 runningDownloadCoroutine = null;
             }
-           
+
             State = ContentLoadState.NOTLOADING;
 
             // Check if GameObject is still valid before proceeding with component cleanup
@@ -376,7 +354,7 @@ namespace Netherlands3D.Tiles3D
         }
 
         #region Content Loading Methods (hybrid coroutine + async approach)
-        
+
         /// <summary>
         /// Download content using coroutine wrapped in async Task
         /// </summary>
@@ -570,14 +548,14 @@ namespace Netherlands3D.Tiles3D
 
             // Optionally remove CESIUM_RTC from GLB JSON
             RemoveCesiumRtcFromRequieredExtentions(ref glbData);
-            
+
             var success = true;
             Uri uri = null;
             if (sourceUri != "")
             {
                 uri = new Uri(sourceUri);
             }
-    
+
             var import = await GltfImportPool.Acquire();
             bool disposeImport = false;
             try
@@ -725,7 +703,7 @@ namespace Netherlands3D.Tiles3D
             {
                 uri = new Uri(sourceUri);
             }
-    
+
             var import = await GltfImportPool.Acquire();
             bool disposeImport = false;
             try
@@ -833,6 +811,12 @@ namespace Netherlands3D.Tiles3D
                 OverrideAllMaterials(overrideMaterial);
             }
 
+            // Parse asset metadata if enabled (for copyright attribution, etc.)
+            if (parseAssetMetaData)
+            {
+                ParseAndNotifyAssetMetadata(import);
+            }
+
             // Optionally release CPU-side copies
             if (makeMeshesNoLongerReadable || makeTexturesNoLongerReadable || simplifyTextureSampling || maxTextureSize > 0)
             {
@@ -855,8 +839,6 @@ namespace Netherlands3D.Tiles3D
 
             return true;
         }
-        
-        
         enum ContentType
         {
             undefined,
@@ -874,10 +856,10 @@ namespace Netherlands3D.Tiles3D
         {
             if (content == null || content.Length < 4)
                 return ContentType.undefined;
-                
+
             // Read magic bytes
             string magic = Encoding.UTF8.GetString(content, 0, 4);
-            
+
             switch (magic)
             {
                 case "b3dm":
@@ -1140,9 +1122,7 @@ namespace Netherlands3D.Tiles3D
                     var mesh = mf.sharedMesh;
                     if (mesh != null)
                     {
-#if UNITY_2020_1_OR_NEWER
                         try { mesh.UploadMeshData(true); } catch { }
-#endif
                     }
                 }
 
@@ -1152,9 +1132,8 @@ namespace Netherlands3D.Tiles3D
                     var mesh = smr.sharedMesh;
                     if (mesh != null)
                     {
-#if UNITY_2020_1_OR_NEWER
                         try { mesh.UploadMeshData(true); } catch { }
-#endif
+
                     }
                 }
             }
@@ -1282,10 +1261,22 @@ namespace Netherlands3D.Tiles3D
             Matrix4x4 BasisMatrix = Matrix4x4.TRS(scene.position, scene.rotation, scene.localScale);
             TileTransform basistransform = new TileTransform()
             {
-                m00 = BasisMatrix.m00, m01 = BasisMatrix.m01, m02 = BasisMatrix.m02, m03 = BasisMatrix.m03,
-                m10 = BasisMatrix.m10, m11 = BasisMatrix.m11, m12 = BasisMatrix.m12, m13 = BasisMatrix.m13,
-                m20 = BasisMatrix.m20, m21 = BasisMatrix.m21, m22 = BasisMatrix.m22, m23 = BasisMatrix.m23,
-                m30 = BasisMatrix.m30, m31 = BasisMatrix.m31, m32 = BasisMatrix.m32, m33 = BasisMatrix.m33,
+                m00 = BasisMatrix.m00,
+                m01 = BasisMatrix.m01,
+                m02 = BasisMatrix.m02,
+                m03 = BasisMatrix.m03,
+                m10 = BasisMatrix.m10,
+                m11 = BasisMatrix.m11,
+                m12 = BasisMatrix.m12,
+                m13 = BasisMatrix.m13,
+                m20 = BasisMatrix.m20,
+                m21 = BasisMatrix.m21,
+                m22 = BasisMatrix.m22,
+                m23 = BasisMatrix.m23,
+                m30 = BasisMatrix.m30,
+                m31 = BasisMatrix.m31,
+                m32 = BasisMatrix.m32,
+                m33 = BasisMatrix.m33,
             };
 
             TileTransform gltFastToGLTF = new TileTransform() { m00 = -1d, m11 = 1, m22 = 1, m33 = 1 };
@@ -1299,10 +1290,22 @@ namespace Netherlands3D.Tiles3D
 
             Matrix4x4 final = new Matrix4x4()
             {
-                m00 = (float)geometryInUnity.m00, m01 = (float)geometryInUnity.m01, m02 = (float)geometryInUnity.m02, m03 = 0f,
-                m10 = (float)geometryInUnity.m10, m11 = (float)geometryInUnity.m11, m12 = (float)geometryInUnity.m12, m13 = 0f,
-                m20 = (float)geometryInUnity.m20, m21 = (float)geometryInUnity.m21, m22 = (float)geometryInUnity.m22, m23 = 0f,
-                m30 = 0f, m31 = 0f, m32 = 0f, m33 = 1f
+                m00 = (float)geometryInUnity.m00,
+                m01 = (float)geometryInUnity.m01,
+                m02 = (float)geometryInUnity.m02,
+                m03 = 0f,
+                m10 = (float)geometryInUnity.m10,
+                m11 = (float)geometryInUnity.m11,
+                m12 = (float)geometryInUnity.m12,
+                m13 = 0f,
+                m20 = (float)geometryInUnity.m20,
+                m21 = (float)geometryInUnity.m21,
+                m22 = (float)geometryInUnity.m22,
+                m23 = 0f,
+                m30 = 0f,
+                m31 = 0f,
+                m32 = 0f,
+                m33 = 1f
             };
 
             final.Decompose(out Vector3 translation, out Quaternion rotation, out Vector3 scale);
@@ -1322,6 +1325,75 @@ namespace Netherlands3D.Tiles3D
             scene.position = sceneCoordinate.ToUnity();
             scene.rotation = sceneCoordinate.RotationToLocalGravityUp() * rotation;
         }
+
+        /// <summary>
+        /// Parse asset metadata from GLB and notify listeners
+        /// </summary>
+        private void ParseAndNotifyAssetMetadata(GLTFast.GltfImport import)
+        {
+            try
+            {
+                // Check if the GLTFast import has asset data available
+                if (import?.GetSourceRoot()?.Asset != null)
+                {
+                    var assetData = import.GetSourceRoot().Asset;
+
+                    // Create ContentMetadata component to hold the asset information
+                    var contentMetadataComponent = gameObject.AddComponent<ContentMetadata>();
+
+                    // Convert GLTFast asset to our GltfMeshFeatures.Asset format
+                    contentMetadataComponent.asset = new GltfMeshFeatures.Asset()
+                    {
+                        copyright = assetData.copyright,
+                        generator = assetData.generator,
+                        version = assetData.version,
+                        minVersion = assetData.minVersion
+                    };
+
+                    // Notify the Read3DTileset that we have asset metadata
+                    if (tilesetReader != null && contentMetadataComponent.asset != null)
+                    {
+                        tilesetReader.OnLoadAssetMetadata.Invoke(contentMetadataComponent);
+                        Debug.Log($"Content: Loaded asset metadata - Copyright: {contentMetadataComponent.asset.copyright}");
+                    }
+                }
+                else
+                {
+                    Debug.LogWarning("Content: No asset metadata found in GLB");
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"Content: Error parsing asset metadata: {ex.Message}");
+            }
+        }
+
+        private void OnDestroy()
+        {
+            // Ensure parent tile releases its reference even if we get destroyed externally
+            if (parentTile != null && parentTile.content == this)
+            {
+                parentTile.content = null;
+            }
+
+            // Defensive: stop pending async work so no callbacks run on a destroyed component
+            if (cancellationTokenSource != null)
+            {
+                cancellationTokenSource.Cancel();
+                cancellationTokenSource.Dispose();
+                cancellationTokenSource = null;
+            }
+
+            if (runningDownloadCoroutine != null)
+            {
+                StopCoroutine(runningDownloadCoroutine);
+                runningDownloadCoroutine = null;
+            }
+
+            onDoneDownloading.RemoveAllListeners();
+            onTileLoadCompleted.RemoveAllListeners();
+        }
+
 
         #endregion
     }
