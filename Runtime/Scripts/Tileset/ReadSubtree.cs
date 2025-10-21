@@ -125,7 +125,7 @@ namespace Netherlands3D.Tiles3D
                 childTile.hascontent = (subtree.ContentAvailabiltyConstant == 1) || (subtree.ContentAvailability != null && subtree.ContentAvailability[localIndex + LevelStartIndex + childNumber]);
                 if (childTile.hascontent)
                 {
-                    childTile.contentUri = (settings.contentUri.Replace("{level}", childTile.level.ToString()).Replace("{x}", childTile.X.ToString()).Replace("{y}", childTile.Y.ToString()));
+                   // childTile.contentUri = (settings.contentUri.Replace("{level}", childTile.level.ToString()).Replace("{x}", childTile.X.ToString()).Replace("{y}", childTile.Y.ToString()));
                     ;
                 }
             }
