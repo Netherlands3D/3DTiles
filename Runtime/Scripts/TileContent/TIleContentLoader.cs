@@ -75,6 +75,8 @@ namespace Netherlands3D.Tiles3D
 
         public static async Task LoadContent(byte[] contentBytes,string sourceUri, Transform containerTransform, Tile tile, Action<bool> succesCallback, bool parseAssetMetaData = false, bool parseSubObjects = false, UnityEngine.Material overrideMaterial = null, bool bypassCertificateValidation = false, Dictionary<string, string> customHeaders = null)
         {
+            succesCallback.Invoke(true);
+            return;
 
             #region get contentType
             // get contentType
