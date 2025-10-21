@@ -87,6 +87,8 @@ namespace Netherlands3D.Tiles3D
         /// </summary>
         public void Load(UnityEngine.Material overrideMaterial = null, Dictionary<string, string> headers = null, bool verbose = false)
         {
+            FinishedLoading(true);
+            return;
             this.headers = headers;
             if (overrideMaterial != null)
             {
