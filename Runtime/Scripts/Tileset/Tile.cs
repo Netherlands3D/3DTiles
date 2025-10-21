@@ -48,7 +48,29 @@ namespace Netherlands3D.Tiles3D
         public double geometricError;
         public float screenSpaceError = float.MaxValue;
         public string refine;
-        public string contentUri = "";
+
+private bool contentURIisSet = false;
+        private string _contentUri = "";
+        public string contentUri{
+            get {
+                
+                if ( contentURIisSet==false)
+                {
+                
+                    return tileSet.implicitTilingSettings.subtreeUri.Replace("{level}", level.ToString()).Replace("{x}", X.ToString()).Replace("{y}", Y.ToString());
+                }
+                else
+                {
+                    return _contentUri;
+                }
+                 }
+            set
+            {
+
+                _contentUri = value;
+                contentURIisSet = true;
+            }
+        }
         public Content content; //Gltf content
 
         public int CountLoadingChildren()
