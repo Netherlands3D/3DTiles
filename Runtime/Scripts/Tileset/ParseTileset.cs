@@ -147,11 +147,16 @@ namespace Netherlands3D.Tiles3D
             if (contentNode != null)
             {
                 tile.hascontent = true;
-                if (tile.contentUri.Contains("tileset") == false)
+                if (contentNode["uri"].Value.Contains(".glb") == false)
 
-                { 
+                {
+                    tile.hascontent = true;
                     tile.contentUri = contentNode["uri"].Value;
-                    }
+                }
+                else
+                {
+                    tile.hascontent = false;
+                }
             }
 
             return tile;
