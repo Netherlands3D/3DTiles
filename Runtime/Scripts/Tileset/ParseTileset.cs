@@ -147,7 +147,7 @@ namespace Netherlands3D.Tiles3D
             if (contentNode != null)
             {
                 tile.hascontent = true;
-                if (contentNode["uri"].Value.Contains(".glb") == false)
+                if (contentNode["uri"].Value.Contains(".json"))
 
                 {
                     tile.hascontent = true;

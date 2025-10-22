@@ -33,7 +33,7 @@ namespace Netherlands3D.Tiles3D
         [Tooltip("The key name to use for the API key in the query string like 'key', or 'code' etc. Default is 'key' for Google Maps API.")]
         [SerializeField] private string queryKeyName = "key";
         public string QueryKeyName { get => queryKeyName; set => queryKeyName = value; }
-
+        
         private string absolutePath = "";
         private string rootPath = "";
         private NameValueCollection queryParameters;
@@ -42,7 +42,7 @@ namespace Netherlands3D.Tiles3D
         public Tile root;
         public double[] transformValues;
 
-        TilingMethod tilingMethod = TilingMethod.ExplicitTiling;
+        public TilingMethod tilingMethod = TilingMethod.ExplicitTiling;
 
         public ImplicitTilingSettings implicitTilingSettings;
 
