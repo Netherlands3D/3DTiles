@@ -147,7 +147,11 @@ namespace Netherlands3D.Tiles3D
             if (contentNode != null)
             {
                 tile.hascontent = true;
-                tile.contentUri = contentNode["uri"].Value;
+                if (tile.contentUri.Contains("tileset") == false)
+
+                { 
+                    tile.contentUri = contentNode["uri"].Value;
+                    }
             }
 
             return tile;
