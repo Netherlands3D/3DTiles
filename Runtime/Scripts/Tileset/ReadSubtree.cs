@@ -156,7 +156,7 @@ namespace Netherlands3D.Tiles3D
                 if (hasSubtree)
                 {
                     childTile.hascontent = true;
-                    childTile.contentUri = (settings.subtreeUri.Replace("{level}", childTile.level.ToString()).Replace("{x}", childTile.X.ToString()).Replace("{y}", childTile.Y.ToString()));
+                    //childTile.contentUri = (settings.subtreeUri.Replace("{level}", childTile.level.ToString()).Replace("{x}", childTile.X.ToString()).Replace("{y}", childTile.Y.ToString()));
                     if(debugLog)
                         Debug.Log("child has subtree");
                 }

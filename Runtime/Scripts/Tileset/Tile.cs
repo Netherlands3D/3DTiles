@@ -9,7 +9,6 @@ namespace Netherlands3D.Tiles3D
     public class Tile : IDisposable
     {
        
-
         //implicit tiling properties
         public int level;
         public int X;
@@ -49,27 +48,23 @@ namespace Netherlands3D.Tiles3D
         public float screenSpaceError = float.MaxValue;
         public string refine;
 
-private bool contentURIisSet = false;
+        private bool contentURIisSet = false;
+        public uint contentID = 0;
         private string _contentUri = "";
         public string contentUri{
             get {
                 
-                if ( contentURIisSet==false)
+                if ( tileSet.tilingMethod==TilingMethod.ImplicitTiling)
                 {
                 
                     return tileSet.implicitTilingSettings.subtreeUri.Replace("{level}", level.ToString()).Replace("{x}", X.ToString()).Replace("{y}", Y.ToString());
                 }
                 else
                 {
-                    return _contentUri;
+                    return tileSet.getTilestring(contentID);
                 }
                  }
-            set
-            {
-
-                _contentUri = value;
-                contentURIisSet = true;
-            }
+            
         }
         public Content content; //Gltf content
 

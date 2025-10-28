@@ -10,6 +10,10 @@ using System.Collections.Specialized;
 using UnityEngine.Events;
 using GLTFast;
 using Netherlands3D.Coordinates;
+using Codice.CM.SEIDInfo;
+using System.IO;
+
+
 
 
 
@@ -92,9 +96,14 @@ namespace Netherlands3D.Tiles3D
         [HideInInspector] public UnityEvent<UnityWebRequest.Result> OnServerRequestFailed = new();
         [HideInInspector] public UnityEvent<ContentMetadata> OnLoadAssetMetadata = new();
         [HideInInspector] public UnityEvent<Content> OnTileLoaded = new();
-        
+
         public string CredentialQuery { get; private set; } = string.Empty;
         
+        public string tilestringPath;
+        public int tilesetID = 0;
+        public uint tilecount = 0;
+
+
         public void ClearKeyFromURL()
         {
             if (CredentialQuery != string.Empty)
@@ -136,17 +145,59 @@ namespace Netherlands3D.Tiles3D
 
         void Start()
         {
+            setupTileLog();
             RefreshTiles();
         }
 
+        void setupTileLog()
+        {
+            Read3DTileset[] tilesets = FindObjectsByType<Read3DTileset>(FindObjectsSortMode.None);
+            int biggestTilesetID = 0;
+            foreach (var tileset in tilesets)
+            {
+                if (tileset.tilesetID > biggestTilesetID)
+                {
+                    biggestTilesetID = tileset.tilesetID;
+                }
+            }
+            tilesetID = biggestTilesetID + 1;
+
+            tilestringPath = Application.persistentDataPath + "/3DTiles/"+tilesetID.ToString();
+            if (Directory.Exists(tilestringPath))
+            {
+                Directory.Delete(tilestringPath,true);
+            }
+            Directory.CreateDirectory(tilestringPath);
+            
+        }
+
+        public uint setTilestring(string tileString)
+        {
+            tilecount++;
+            
+            File.WriteAllText(tilestringPath + "/" + tilecount.ToString(), tileString);
+            
+            return tilecount;
+        }
+        public string getTilestring(uint tileID)
+        {
+            string filepath = tilestringPath + "/" + tileID.ToString();
+            if (File.Exists(filepath))
+            {
+                
+                return File.ReadAllText(filepath);
+                
+            }
+            return "";
+        }
         private void OnEnable()
         {
-            if (root !=null)
+            if (root != null)
             {
                 InvalidateBounds();
                 StartCoroutine(LoadInView());
             }
-            
+
         }
         public void RefreshTiles()
         {
@@ -571,6 +622,7 @@ namespace Netherlands3D.Tiles3D
 
             if (tile.isLoading == false && tile.children.Count == 0 && tile.contentUri.Contains(".json"))
             {
+
                 tile.isLoading = true;
                 StartCoroutine(LoadNestedTileset(tile));
                 return;
@@ -578,7 +630,7 @@ namespace Netherlands3D.Tiles3D
 
             if (tile.isLoading == false && tile.children.Count == 0 && tile.contentUri.Contains(".subtree"))
             {
-                UnityEngine.Debug.Log(tile.contentUri);
+
                 ReadSubtree subtreeReader = GetComponent<ReadSubtree>();
                 if (subtreeReader.isbusy)
                 {
@@ -690,8 +742,7 @@ namespace Netherlands3D.Tiles3D
 
             //RD amsterdam specific temp fix.
             relativeContentUrl = relativeContentUrl.Replace("../", "");
-
-            var fullPath = (tile.contentUri.StartsWith("/")) ? rootPath + relativeContentUrl : absolutePath + relativeContentUrl;
+            var fullPath = (relativeContentUrl.StartsWith("/")) ? rootPath + relativeContentUrl : absolutePath + relativeContentUrl;
 
             //Combine query to pass on session id and API key (Google Maps 3DTiles API style)
             UriBuilder uriBuilder = new(fullPath);

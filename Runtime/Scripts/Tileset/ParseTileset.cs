@@ -62,7 +62,6 @@ namespace Netherlands3D.Tiles3D
                         childTile = ReadExplicitNode(rootnode, childTile);
                         childTile.parent = rootTile;
                         rootTile.geometricError += 10;
-                        childTile.parent.contentUri = "";
                         rootTile.children.Add(childTile);
                         
                     }
@@ -94,6 +93,7 @@ namespace Netherlands3D.Tiles3D
         /// </summary>
         internal static Tile ReadExplicitNode(JSONNode node, Tile tile)
         {
+
             JSONNode transformNode = node["transform"];
 
             double[] transformValues = new double[16] { 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0 };
@@ -147,16 +147,9 @@ namespace Netherlands3D.Tiles3D
             if (contentNode != null)
             {
                 tile.hascontent = true;
-                if (contentNode["uri"].Value.Contains(".json"))
 
-                {
-                    tile.hascontent = true;
-                    tile.contentUri = contentNode["uri"].Value;
-                }
-                else
-                {
-                    tile.hascontent = false;
-                }
+                    tile.contentID = tile.tileSet.setTilestring(contentNode["uri"].Value);
+               
             }
 
             return tile;
@@ -245,10 +238,7 @@ namespace Netherlands3D.Tiles3D
             
             if(DebugLog)
                 Debug.Log("Load subtree: " + "");
-            if (parentTile.level==0)
-            {
-                parentTile.contentUri = implicitTilingSettings.subtreeUri.Replace("{level}", parentTile.level.ToString()).Replace("{x}", parentTile.X.ToString()).Replace("{y}", parentTile.Y.ToString());
-            }
+            
             subtreeReader.DownloadSubtree("", implicitTilingSettings,parentTile, null);
         }
 
